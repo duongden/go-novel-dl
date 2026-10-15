@@ -915,6 +915,25 @@ func registerBookshelfRoutes(group *gin.RouterGroup, service *Service) {
 		c.JSON(http.StatusAccepted, gin.H{"task": task})
 	})
 
+	group.GET("/api/bookshelf/progress", func(c *gin.Context) {
+		siteKey := strings.TrimSpace(c.Query("site"))
+		bookID := strings.TrimSpace(c.Query("book_id"))
+		if siteKey == "" || bookID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "site and book_id are required"})
+			return
+		}
+		item, ok, err := config.FindBookshelfProgress(siteKey, bookID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{"item": nil})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"item": item})
+	})
+
 	group.POST("/api/bookshelf/progress", func(c *gin.Context) {
 		var body struct {
 			Site          string `json:"site"`

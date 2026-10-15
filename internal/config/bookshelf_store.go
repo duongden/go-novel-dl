@@ -231,6 +231,31 @@ func FindBookshelfBook(siteKey, bookID string) (BookshelfItem, bool, error) {
 	return toBookshelfItem(entry), true, nil
 }
 
+// FindBookshelfProgress locates a book row by site/book_id regardless of
+// whether it is a real bookshelf entry or an implicit history-only row. It is
+// used to resume reading progress from the detail view.
+func FindBookshelfProgress(siteKey, bookID string) (BookshelfItem, bool, error) {
+	siteKey = strings.TrimSpace(siteKey)
+	bookID = strings.TrimSpace(bookID)
+	if siteKey == "" || bookID == "" {
+		return BookshelfItem{}, false, nil
+	}
+	db, err := bookshelfDB()
+	if err != nil {
+		return BookshelfItem{}, false, err
+	}
+	var entry bookshelfItem
+	err = db.Where("kind = ? AND site = ? AND book_id = ?", BookshelfItemKindBook, siteKey, bookID).
+		Take(&entry).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return BookshelfItem{}, false, nil
+		}
+		return BookshelfItem{}, false, err
+	}
+	return toBookshelfItem(entry), true, nil
+}
+
 // BookshelfBreadcrumb walks parent links upwards and returns the path from the
 // root to the supplied item (inclusive). The returned slice is empty when id is
 // zero.

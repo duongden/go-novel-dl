@@ -350,3 +350,52 @@ func TestBookshelfReadingProgressAndHistory(t *testing.T) {
 		t.Fatalf("expected silent book to be deleted")
 	}
 }
+
+func TestFindBookshelfProgress(t *testing.T) {
+	resetSiteCatalogForTest(t)
+
+	if _, ok, err := FindBookshelfProgress("", "whatever"); err != nil || ok {
+		t.Fatalf("expected empty site to be a miss without error, got ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := FindBookshelfProgress("esjzone", "  "); err != nil || ok {
+		t.Fatalf("expected empty book_id to be a miss without error, got ok=%v err=%v", ok, err)
+	}
+
+	if _, ok, err := FindBookshelfProgress("esjzone", "unknown"); err != nil || ok {
+		t.Fatalf("expected unknown book to be a miss, got ok=%v err=%v", ok, err)
+	}
+
+	shelved, err := AddBookshelfBook(BookshelfBookInput{Site: "esjzone", BookID: "alpha", Title: "Alpha"})
+	if err != nil {
+		t.Fatalf("add book: %v", err)
+	}
+	found, ok, err := FindBookshelfProgress(" esjzone ", " alpha ")
+	if err != nil || !ok {
+		t.Fatalf("expected shelf book to be found, ok=%v err=%v", ok, err)
+	}
+	if found.ID != shelved.ID || found.Implicit {
+		t.Fatalf("unexpected shelf lookup result: %+v", found)
+	}
+
+	implicit, _, err := UpdateBookshelfProgress(BookshelfProgressInput{
+		Site:         "esjzone",
+		BookID:       "history-only",
+		ChapterID:    "ch-2",
+		ChapterIndex: 1,
+		ChapterTitle: "第二章",
+		Title:        "History Only",
+	})
+	if err != nil {
+		t.Fatalf("create implicit history row: %v", err)
+	}
+	found, ok, err = FindBookshelfProgress("esjzone", "history-only")
+	if err != nil || !ok {
+		t.Fatalf("expected implicit row to be found, ok=%v err=%v", ok, err)
+	}
+	if found.ID != implicit.ID || !found.Implicit {
+		t.Fatalf("unexpected implicit lookup result: %+v", found)
+	}
+	if found.LastReadChapterID != "ch-2" || found.LastReadChapterIndex != 1 {
+		t.Fatalf("expected reading progress on lookup, got %+v", found)
+	}
+}

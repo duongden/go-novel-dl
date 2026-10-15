@@ -1483,6 +1483,15 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
 
   const actions = document.createElement("div");
   actions.className = "detail-actions";
+
+  const continueButton = document.createElement("button");
+  continueButton.type = "button";
+  continueButton.className = "download-button detail-continue-button";
+  continueButton.textContent = "继续阅读";
+  continueButton.title = "从上次阅读进度继续";
+  continueButton.addEventListener("click", () => void continueReadingFromDetail(result, activeVariant, detail, continueButton));
+  actions.appendChild(continueButton);
+
   const cacheButton = document.createElement("button");
   cacheButton.type = "button";
   cacheButton.className = "tool-button";
@@ -1506,8 +1515,32 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
   addShelfButton.textContent = "加入书架";
   addShelfButton.addEventListener("click", () => void addCurrentDetailToBookshelf(result, activeVariant, detail, addShelfButton));
   actions.appendChild(addShelfButton);
+  void syncDetailShelfState(addShelfButton, activeVariant.site, activeVariant.book_id);
 
+  const similarForm = document.createElement("form");
+  similarForm.className = "detail-similar-search";
+  const similarInput = document.createElement("input");
+  similarInput.type = "search";
+  similarInput.className = "detail-similar-input";
+  similarInput.value = title;
+  similarInput.placeholder = "搜索相似书名的书";
+  similarInput.setAttribute("aria-label", "搜索相似书名的书");
+  const similarButton = document.createElement("button");
+  similarButton.type = "submit";
+  similarButton.className = "tool-button";
+  similarButton.textContent = "搜相似";
+  similarButton.title = "用当前书名到所有渠道搜索相似的书";
+  similarForm.append(similarInput, similarButton);
+  similarForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = similarInput.value.trim();
+    if (!query) return setStatus("请输入要搜索的书名。");
+    keywordInput.value = query;
+    appState.page = 1;
+    void performSearch(false);
+  });
   summary.appendChild(actions);
+  summary.appendChild(similarForm);
 
   hero.appendChild(summary); detailContentNode.appendChild(hero);
 
@@ -3822,7 +3855,6 @@ async function addCurrentDetailToBookshelf(result, variant, detail, button, opti
   };
 
   const original = button ? button.textContent : "";
-  const progressView = !silent ? createInlineTaskView() : null;
   if (button) { button.disabled = true; button.textContent = "加入中..."; }
   try {
     const response = await fetch(`${root}/api/bookshelf/books`, {
@@ -3833,20 +3865,67 @@ async function addCurrentDetailToBookshelf(result, variant, detail, button, opti
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "add bookshelf failed");
     appState.bookshelf.loaded = false;
-    if (progressView && button && button.parentElement && button.parentElement.parentElement) {
-      button.parentElement.parentElement.insertBefore(progressView, button.parentElement.nextSibling);
-    }
-    if (!silent) setStatus(`已加入书架，开始下载到服务器本地：${data.item.title || data.item.book_id}`);
-    await startDownloadTask({ site, book_id: bookID }, null, {
-      inlineView: progressView,
-      keepDetailOpen: true,
-      noActivate: true,
-    });
-    if (button) { button.disabled = false; button.textContent = original; }
+    if (!silent) setStatus(`已加入书架：${data.item.title || data.item.book_id}。需要离线阅读时可点击「缓存」下载。`);
+    if (button) { button.disabled = false; button.textContent = "已在书架"; }
   } catch (error) {
     if (!silent) setStatus(`加入书架失败：${error.message}`);
     if (button) { button.disabled = false; button.textContent = original; }
   }
+}
+
+// fetchBookshelfProgress 查询某本书（含仅历史记录的隐式条目）的书架数据。
+async function fetchBookshelfProgress(site, bookID) {
+  if (!site || !bookID) return null;
+  try {
+    const response = await fetch(`${root}/api/bookshelf/progress?site=${encodeURIComponent(site)}&book_id=${encodeURIComponent(bookID)}`);
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload && payload.item ? payload.item : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// syncDetailShelfState 打开详情时标记「加入书架」按钮的已收藏状态。
+async function syncDetailShelfState(button, site, bookID) {
+  if (!button || !site || !bookID) return;
+  const item = await fetchBookshelfProgress(site, bookID);
+  if (!button.isConnected || !item || item.implicit) return;
+  button.textContent = "已在书架";
+}
+
+// continueReadingFromDetail 详情页「继续阅读」：有阅读进度则跳到上次章节，否则从第一章开始。
+async function continueReadingFromDetail(result, variant, detail, button) {
+  const activeVariant = variant || (result && result.primary);
+  const site = activeVariant && activeVariant.site;
+  const bookID = activeVariant && activeVariant.book_id;
+  if (!site || !bookID) {
+    setStatus("继续阅读失败：缺少站点或 book_id。");
+    return;
+  }
+  const book = (detail && detail.book) || {};
+  const item = {
+    site,
+    book_id: bookID,
+    title: book.title || displayDetailTitle(result, activeVariant, book),
+    author: book.author || displayDetailAuthor(result, activeVariant, book),
+    cover_url: book.cover_url || result.cover_url || activeVariant.cover_url || "",
+    description: book.description || result.description || "",
+    latest_chapter: result.latest_chapter || book.latest_chapter || "",
+    source_url: book.source_url || activeVariant.url || result.url || "",
+  };
+  const progress = await fetchBookshelfProgress(site, bookID);
+  if (progress) {
+    item.last_read_chapter_id = progress.last_read_chapter_id || "";
+    item.last_read_chapter_index = progress.last_read_chapter_index || 0;
+    item.last_read_chapter_title = progress.last_read_chapter_title || "";
+  }
+  // openBookshelfReader 会改写详情状态，这里保留原详情以便阅读器「返回」时恢复。
+  const savedResult = appState.detailResult;
+  const savedVariant = appState.activeDetailVariant;
+  await openBookshelfReader(item, button);
+  appState.detailResult = savedResult;
+  appState.activeDetailVariant = savedVariant;
 }
 
 async function openBookshelfReader(item, button, options = {}) {
