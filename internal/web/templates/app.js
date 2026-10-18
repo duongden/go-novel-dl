@@ -2324,7 +2324,7 @@ const readerCatalogList = document.getElementById("readerCatalogList");
 const readerTitle = document.getElementById("readerTitle");
 const readerContent = document.getElementById("readerContent");
 const readerBody = document.getElementById("readerBody");
-const readerPageViewport = document.getElementById("readerPageViewport");
+let readerPageViewport = document.getElementById("readerPageViewport");
 const readerPageMeter = document.getElementById("readerPageMeter");
 const readerProgress = document.getElementById("readerProgress");
 const readerTopbar = document.querySelector(".reader-topbar");
@@ -2333,6 +2333,27 @@ const readerTransitionKicker = document.getElementById("readerTransitionKicker")
 const readerTransitionPosition = document.getElementById("readerTransitionPosition");
 const readerTransitionTitle = document.getElementById("readerTransitionTitle");
 const readerTransitionStatus = document.getElementById("readerTransitionStatus");
+
+function ensureReaderPageViewport() {
+  const existing = document.getElementById("readerPageViewport");
+  if (existing) {
+    readerPageViewport = existing;
+    return existing;
+  }
+  const body = document.getElementById("readerBody") || readerBody;
+  const content = document.getElementById("readerContent") || readerContent;
+  if (!body || !content) return null;
+
+  const viewport = document.createElement("div");
+  viewport.id = "readerPageViewport";
+  viewport.className = "reader-page-viewport";
+  body.insertBefore(viewport, content.parentElement === body ? content : null);
+  if (content.parentElement !== viewport) viewport.appendChild(content);
+  readerPageViewport = viewport;
+  return viewport;
+}
+
+readerPageViewport = ensureReaderPageViewport();
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
 const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v1";
@@ -2371,6 +2392,11 @@ let readerPageLayoutFrame = 0;
 let readerContentCachePersistTimer = 0;
 
 function openReader(chapters, index, options = {}) {
+  const pageViewport = ensureReaderPageViewport();
+  if (!readerOverlay || !readerContent || !pageViewport) {
+    showToast("阅读器加载失败", "页面资源版本不一致，请刷新页面后重试。", "error");
+    return;
+  }
   readerState.chapters = chapters;
   readerState.currentIndex = index;
   readerState.transitioning = false;
@@ -2381,7 +2407,7 @@ function openReader(chapters, index, options = {}) {
   readerState.pageCount = 1;
   resetReaderSwipe();
   hideReaderTransition();
-  readerPageViewport.classList.remove(
+  pageViewport.classList.remove(
     "is-reader-leaving-next",
     "is-reader-leaving-previous",
     "is-reader-entering-next",
@@ -2556,12 +2582,15 @@ function closeReader() {
   setReaderControlsVisible(false);
   resetReaderSwipe();
   hideReaderTransition();
-  readerPageViewport.classList.remove(
-    "is-reader-leaving-next",
-    "is-reader-leaving-previous",
-    "is-reader-entering-next",
-    "is-reader-entering-previous",
-  );
+  const pageViewport = ensureReaderPageViewport();
+  if (pageViewport) {
+    pageViewport.classList.remove(
+      "is-reader-leaving-next",
+      "is-reader-leaving-previous",
+      "is-reader-entering-next",
+      "is-reader-entering-previous",
+    );
+  }
   readerOverlay.hidden = true;
   document.body.classList.remove("has-overlay");
   setReaderScrollLocked(false);

@@ -347,6 +347,12 @@ func collectSiteStats(runtime *app.Runtime) []SiteStat {
 	return stats
 }
 
+func disableWebAssetCache(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
 func newRouter(service *Service) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
@@ -369,6 +375,7 @@ func newRouter(service *Service) *gin.Engine {
 
 	group := router.Group(RoutePrefix)
 	group.GET("/", func(c *gin.Context) {
+		disableWebAssetCache(c)
 		c.HTML(http.StatusOK, "index.html", gin.H{
 			"Root":           RoutePrefix,
 			"DefaultSources": service.DefaultSources,
@@ -381,12 +388,14 @@ func newRouter(service *Service) *gin.Engine {
 		})
 	})
 	group.GET("/style.css", func(c *gin.Context) {
+		disableWebAssetCache(c)
 		c.FileFromFS("templates/style.css", http.FS(templateFS))
 	})
 	group.GET("/icon-256.png", func(c *gin.Context) {
 		c.FileFromFS("templates/icon-256.png", http.FS(templateFS))
 	})
 	group.GET("/app.js", func(c *gin.Context) {
+		disableWebAssetCache(c)
 		c.FileFromFS("templates/app.js", http.FS(templateFS))
 	})
 	group.GET("/healthz", func(c *gin.Context) {

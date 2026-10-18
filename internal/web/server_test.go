@@ -126,6 +126,24 @@ func TestIndexPageIncludesSourceTagFilterControls(t *testing.T) {
 	}
 }
 
+func TestWebAssetsDisableStaleMobileCache(t *testing.T) {
+	service := newTestService()
+	router := newRouter(service)
+
+	for _, path := range []string{RoutePrefix + "/", RoutePrefix + "/app.js", RoutePrefix + "/style.css"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected %s to return 200, got %d", path, resp.Code)
+		}
+		if got := resp.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+			t.Fatalf("expected %s to disable stale caches, got Cache-Control %q", path, got)
+		}
+	}
+}
+
 func TestSourceTagEditorAssets(t *testing.T) {
 	styleData, err := templateFS.ReadFile("templates/style.css")
 	if err != nil {
@@ -667,6 +685,9 @@ func TestReaderUsesPaginatedHorizontalChapterTransitions(t *testing.T) {
 	}
 	script := string(scriptData)
 	for _, needle := range []string{
+		`function ensureReaderPageViewport`,
+		`readerPageViewport = ensureReaderPageViewport();`,
+		`const pageViewport = ensureReaderPageViewport();`,
 		`function layoutReaderPages`,
 		`function setReaderPagePosition`,
 		`function turnReaderPage`,
