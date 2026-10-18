@@ -119,6 +119,38 @@ func TestIndexPageIncludesSourceTagFilterControls(t *testing.T) {
 	}
 }
 
+func TestSourceFiltersToggleIsAvailableOnDesktop(t *testing.T) {
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		".source-filters-toggle {\n  display: flex;",
+		".source-filters-toggle-summary {",
+		".source-filters.is-collapsed { display: none; }",
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected desktop source filters toggle style to contain %s", needle)
+		}
+	}
+
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`window.matchMedia("(max-width: 768px)")`,
+		`sourceFiltersToggleButton.addEventListener("click"`,
+		`applySourceFiltersCollapsed(collapsed)`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected source filters toggle script to contain %s", needle)
+		}
+	}
+}
+
 func TestIndexPageIncludesBlurWebImagesControl(t *testing.T) {
 	service := newTestService()
 	service.GeneralConfig = config.GeneralConfigRecord{BlurWebImages: true}
