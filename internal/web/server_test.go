@@ -317,13 +317,74 @@ func TestSettingsSavePromptAndStickyCloseStyles(t *testing.T) {
 	}
 }
 
-func TestReaderMobileControlsRequireCenterTap(t *testing.T) {
+func TestReturnControlsAvoidFullWidthBars(t *testing.T) {
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`#detailCloseButton,`,
+		`#readerDetailButton {`,
+		`#detailCloseButton { pointer-events: auto; }`,
+		`::-webkit-scrollbar:horizontal { display: none; }`,
+		`.reader-topbar {`,
+		`border-radius: 16px;`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected non-obstructing return style %s", needle)
+		}
+	}
+}
+
+func TestTimeoutNoticeUsesDedicatedFloatingState(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`function warningKind(warning)`,
+		`dialog.classList.toggle("has-timeout", hasTimeout)`,
+		`warning.kind === "timeout"`,
+		`warning.kind !== "timeout" && warning.kind !== "blocked"`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected timeout notice script %s", needle)
+		}
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`.site-warning-card.site-warning-timeout`,
+		`.temporary-warning-dialog.has-timeout`,
+		`.reader-error {`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected timeout notice style %s", needle)
+		}
+	}
+}
+
+func TestReaderControlsAreCenterTapAndAutoHide(t *testing.T) {
 	data, err := templateFS.ReadFile("templates/app.js")
 	if err != nil {
 		t.Fatalf("read app.js: %v", err)
 	}
 	script := string(data)
-	for _, needle := range []string{`setReaderControlsVisible(false)`, `function handleReaderBodyClick`, `inMiddleX`, `inMiddleY`, `readerBody.addEventListener("click", handleReaderBodyClick)`} {
+	for _, needle := range []string{
+		`setReaderControlsVisible(false)`,
+		`function scheduleReaderControlsHide`,
+		`function handleReaderBodyClick`,
+		`inMiddleX`,
+		`inMiddleY`,
+		`readerBody.addEventListener("click", handleReaderBodyClick)`,
+		`if (readerControlsVisible() && (!readerCatalogPanel || readerCatalogPanel.hidden))`,
+	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected reader script to contain %s", needle)
 		}
@@ -334,7 +395,18 @@ func TestReaderMobileControlsRequireCenterTap(t *testing.T) {
 		t.Fatalf("read style.css: %v", err)
 	}
 	style := string(styleData)
-	for _, needle := range []string{`.reader-overlay.reader-controls-visible .reader-topbar`, `opacity: 0`, `pointer-events: none`, `.reader-overlay.reader-controls-visible .reader-bg-picker`} {
+	start := strings.Index(style, `.reader-topbar {`)
+	end := strings.Index(style[start:], `}`)
+	if start < 0 || end < 0 {
+		t.Fatal("expected reader-topbar base style")
+	}
+	baseRule := style[start : start+end]
+	for _, needle := range []string{`position: fixed;`, `opacity: 0`, `visibility: hidden`, `pointer-events: none`} {
+		if !strings.Contains(baseRule, needle) {
+			t.Fatalf("expected reader topbar to start hidden, missing %s", needle)
+		}
+	}
+	for _, needle := range []string{`.reader-overlay.reader-controls-visible .reader-topbar`, `opacity: 1`, `visibility: visible`, `pointer-events: auto`, `.reader-overlay.reader-controls-visible .reader-bg-picker`} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected reader styles to contain %s", needle)
 		}
@@ -362,7 +434,7 @@ func TestMobileSearchResultStylesPreventLongTextOverflow(t *testing.T) {
 		`@media (max-width: 480px)`,
 		`grid-template-columns: 72px minmax(0, 1fr)`,
 		`.result-cover-overlay { display: none; }`,
-		`max-height: min(36vh, 180px)`,
+		`max-height: min(42vh, 260px)`,
 	} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected mobile overflow guard style %s", needle)

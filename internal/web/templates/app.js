@@ -191,10 +191,11 @@ function renderSiteWarnings() {
 function createSiteWarningCard(warning) {
   const card = document.createElement("article");
   card.className = `site-warning-card site-warning-${warning.level || "info"}`;
+  if (warning.kind) card.classList.add(`site-warning-${warning.kind}`);
 
   const icon = document.createElement("span");
   icon.className = "site-warning-icon";
-  icon.textContent = warningLevelIcons[warning.level] || "ℹ️";
+  icon.textContent = warning.kind === "timeout" ? "⏱️" : (warningLevelIcons[warning.level] || "ℹ️");
 
   const message = document.createElement("p");
   message.className = "site-warning-message";
@@ -205,12 +206,14 @@ function createSiteWarningCard(warning) {
   header.append(icon, message);
   card.appendChild(header);
 
-  const stat = siteStats.find((stat) => stat.site_key === warning.site_key);
-  if (stat && stat.enabled.length) {
-    const detail = document.createElement("p");
-    detail.className = "site-warning-detail";
-    detail.textContent = `已自动配置字段：${stat.enabled.join("、")}`;
-    card.appendChild(detail);
+  if (warning.kind !== "timeout" && warning.kind !== "blocked") {
+    const stat = siteStats.find((stat) => stat.site_key === warning.site_key);
+    if (stat && stat.enabled.length) {
+      const detail = document.createElement("p");
+      detail.className = "site-warning-detail";
+      detail.textContent = `已自动配置字段：${stat.enabled.join("、")}`;
+      card.appendChild(detail);
+    }
   }
 
   if (warning.action_label && warning.action_link) {
@@ -242,10 +245,16 @@ function showTemporaryWarningDialog(warnings) {
   if (!items.length) return;
   const dialog = ensureTemporaryWarningDialog();
   const list = dialog.querySelector(".temporary-warning-list");
+  const title = dialog.querySelector("#temporaryWarningHeading");
+  const normalized = items.map((warning) => (
+    typeof warning === "string" ? { message: warning, level: "info" } : warning
+  ));
+  const hasTimeout = normalized.some((warning) => warning.kind === "timeout");
+  dialog.classList.toggle("has-timeout", hasTimeout);
+  if (title) title.textContent = hasTimeout ? "渠道响应超时" : "临时提示";
   list.innerHTML = "";
-  items.forEach((warning) => {
-    const item = typeof warning === "string" ? { message: warning, level: "info" } : warning;
-    list.appendChild(createSiteWarningCard(item));
+  normalized.forEach((warning) => {
+    list.appendChild(createSiteWarningCard(warning));
   });
   dialog.hidden = false;
   if (temporaryWarningDialogTimer) window.clearTimeout(temporaryWarningDialogTimer);
@@ -1233,7 +1242,13 @@ function renderWarnings(warnings) {
   warnings.forEach((warning) => {
     const message = formatSearchWarning(warning);
     if (isTemporaryWarningText(message)) {
-      temporaryWarnings.push(message);
+      const kind = warningKind(warning);
+      temporaryWarnings.push({
+        message,
+        kind,
+        level: kind === "timeout" || kind === "blocked" ? "warning" : "info",
+        site_key: warning.site || "",
+      });
       return;
     }
     const node = document.createElement("div");
@@ -1263,6 +1278,13 @@ function formatSearchWarning(warning) {
     reason += " 无限轻小说近期较容易出现 403，可稍后重试。";
   }
   return `${site}：${reason}`;
+}
+
+function warningKind(warning) {
+  const lower = String((warning && warning.error) || "").toLowerCase();
+  if (lower.includes("context deadline exceeded") || lower.includes("timeout")) return "timeout";
+  if (lower.includes("http 403")) return "blocked";
+  return "info";
 }
 
 function temporaryWarningSummary(warnings) {
@@ -1895,10 +1917,12 @@ const readerTitle = document.getElementById("readerTitle");
 const readerContent = document.getElementById("readerContent");
 const readerBody = document.getElementById("readerBody");
 const readerProgress = document.getElementById("readerProgress");
+const readerTopbar = document.querySelector(".reader-topbar");
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
 const readerState = { chapters: [], loadedMin: 0, loadedMax: -1, currentIndex: 0, loadingUp: false, loadingDown: false, canAutoLoad: false, token: 0, pending: new Map() };
 let readerSessionPersistTimer = 0;
+let readerControlsHideTimer = 0;
 
 function openReader(chapters, index, options = {}) {
   readerState.chapters = chapters;
@@ -2055,6 +2079,7 @@ function toggleReaderCatalog() {
 
 function showReaderCatalog() {
   if (!readerCatalogPanel || !readerCatalogList || !readerCatalogButton) return;
+  setReaderControlsVisible(true, { autoHideMs: 0 });
   renderReaderCatalog();
   readerCatalogPanel.hidden = false;
   readerCatalogButton.setAttribute("aria-expanded", "true");
@@ -2063,14 +2088,41 @@ function showReaderCatalog() {
 function hideReaderCatalog() {
   if (readerCatalogPanel) readerCatalogPanel.hidden = true;
   if (readerCatalogButton) readerCatalogButton.setAttribute("aria-expanded", "false");
+  if (readerControlsVisible() && !readerOverlay.hidden) scheduleReaderControlsHide();
 }
 
-function isMobileReaderViewport() {
-  return window.matchMedia && window.matchMedia("(max-width: 720px)").matches;
+function clearReaderControlsHideTimer() {
+  if (!readerControlsHideTimer) return;
+  window.clearTimeout(readerControlsHideTimer);
+  readerControlsHideTimer = 0;
 }
 
-function setReaderControlsVisible(visible) {
-  if (readerOverlay) readerOverlay.classList.toggle("reader-controls-visible", Boolean(visible));
+function scheduleReaderControlsHide(delay = 4200) {
+  clearReaderControlsHideTimer();
+  if (!readerOverlay || readerOverlay.hidden || !readerControlsVisible()) return;
+  if (readerCatalogPanel && !readerCatalogPanel.hidden) return;
+  const timeout = Number(delay);
+  if (!Number.isFinite(timeout) || timeout <= 0) return;
+  readerControlsHideTimer = window.setTimeout(() => {
+    readerControlsHideTimer = 0;
+    if (!readerOverlay.hidden && (!readerCatalogPanel || readerCatalogPanel.hidden)) {
+      setReaderControlsVisible(false, { autoHideMs: 0 });
+    }
+  }, timeout);
+}
+
+function setReaderControlsVisible(visible, options = {}) {
+  if (!readerOverlay) return;
+  const show = Boolean(visible);
+  clearReaderControlsHideTimer();
+  readerOverlay.classList.toggle("reader-controls-visible", show);
+  if (!show) {
+    hideReaderCatalog();
+    return;
+  }
+  if (readerCatalogPanel && !readerCatalogPanel.hidden) return;
+  const autoHideMs = options.autoHideMs === undefined ? 4200 : Number(options.autoHideMs);
+  if (Number.isFinite(autoHideMs) && autoHideMs > 0) scheduleReaderControlsHide(autoHideMs);
 }
 
 function readerControlsVisible() {
@@ -2078,7 +2130,8 @@ function readerControlsVisible() {
 }
 
 function handleReaderBodyClick(event) {
-  if (!isMobileReaderViewport() || readerOverlay.hidden) return;
+  if (readerOverlay.hidden) return;
+  if (event.target.closest("a, button, input, select, textarea, label")) return;
   const rect = readerBody.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const x = event.clientX - rect.left;
@@ -2298,8 +2351,17 @@ if (readerDetailButton) readerDetailButton.addEventListener("click", openReaderD
 if (readerCatalogButton) readerCatalogButton.addEventListener("click", toggleReaderCatalog);
 if (readerCatalogCloseButton) readerCatalogCloseButton.addEventListener("click", hideReaderCatalog);
 readerBody.addEventListener("click", handleReaderBodyClick);
+if (readerTopbar) {
+  readerTopbar.addEventListener("pointerenter", clearReaderControlsHideTimer);
+  readerTopbar.addEventListener("pointerleave", () => scheduleReaderControlsHide(1800));
+  readerTopbar.addEventListener("focusin", clearReaderControlsHideTimer);
+  readerTopbar.addEventListener("focusout", () => scheduleReaderControlsHide(1800));
+}
 
 readerBody.addEventListener("scroll", () => {
+  if (readerControlsVisible() && (!readerCatalogPanel || readerCatalogPanel.hidden)) {
+    setReaderControlsVisible(false);
+  }
   if (!readerState.canAutoLoad) return;
   if (readerSessionPersistTimer) {
     window.clearTimeout(readerSessionPersistTimer);
