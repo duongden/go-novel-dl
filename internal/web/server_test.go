@@ -344,6 +344,7 @@ func TestSettingsCenterUsesSectionedNavigation(t *testing.T) {
 	for _, needle := range []string{
 		`.site-config-modal {`,
 		`grid-template-rows: auto auto minmax(0, 1fr) auto`,
+		`grid-template-columns: repeat(4, minmax(0, 1fr))`,
 		`.settings-modal-header {`,
 		`.settings-modal-footer {`,
 		`.settings-navigation {`,
@@ -354,6 +355,43 @@ func TestSettingsCenterUsesSectionedNavigation(t *testing.T) {
 	} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected settings styles to contain %s", needle)
+		}
+	}
+}
+
+func TestMobileSearchAndSimilarControlsUseStableLayout(t *testing.T) {
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`grid-template-columns: minmax(150px, 170px) auto`,
+		`@media (max-width: 768px), (max-height: 560px) and (max-width: 1000px)`,
+		`@media (max-height: 560px) and (min-width: 769px) and (max-width: 1000px)`,
+		`.page-indicator {`,
+		`grid-template-columns: auto minmax(160px, 1fr) auto`,
+		`.detail-similar-label {`,
+		`.detail-similar-button {`,
+		`-webkit-overflow-scrolling: touch`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected responsive search or settings styles to contain %s", needle)
+		}
+	}
+
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`similarForm.className = "detail-similar-search"`,
+		`similarLabel.className = "detail-similar-label"`,
+		`similarButton.className = "detail-similar-button"`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected detail similar search script to contain %s", needle)
 		}
 	}
 }
@@ -505,10 +543,11 @@ func TestReaderControlsAreCenterTapAndAutoHide(t *testing.T) {
 		`setReaderControlsVisible(false)`,
 		`function scheduleReaderControlsHide`,
 		`function handleReaderBodyClick`,
-		`inMiddleX`,
-		`inMiddleY`,
+		`rect.width * 0.28`,
+		`turnReaderPage(-1)`,
+		`turnReaderPage(1)`,
 		`readerBody.addEventListener("click", handleReaderBodyClick)`,
-		`if (readerControlsVisible() && (!readerCatalogPanel || readerCatalogPanel.hidden))`,
+		`readerPageMeter.textContent`,
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected reader script to contain %s", needle)
@@ -543,6 +582,92 @@ func TestReaderControlsAreCenterTapAndAutoHide(t *testing.T) {
 	}
 	if strings.Contains(style, `.reader-topbar #readerCloseButton`) {
 		t.Fatalf("did not expect top-right reader close button style")
+	}
+}
+
+func TestReaderUsesPaginatedHorizontalChapterTransitions(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`function layoutReaderPages`,
+		`function setReaderPagePosition`,
+		`function turnReaderPage`,
+		`async function transitionReaderChapter`,
+		`showReaderTransition(step, targetIndex, targetCached)`,
+		`function prefetchReaderAdjacentChapters`,
+		`function isReaderChapterCached`,
+		`function rememberReaderChapterContent`,
+		`function getReaderCachedChapterContent`,
+		`function loadReaderContentCache`,
+		`function flushReaderContentCache`,
+		`READER_CONTENT_CACHE_KEY`,
+		`prefetchReaderAdjacentChapters(index);`,
+		`readerBody.addEventListener("touchstart", handleReaderTouchStart`,
+		`readerBody.addEventListener("touchmove", handleReaderTouchMove, { passive: false })`,
+		`readerBody.addEventListener("wheel", handleReaderWheel, { passive: false })`,
+		`window.addEventListener("keydown", handleReaderKeydown)`,
+		`function prefetchReaderChapter`,
+		`readerState.pageCount`,
+		`readerState.transitioning`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected reader swipe transition script to contain %s", needle)
+		}
+	}
+	for _, forbidden := range []string{
+		`function appendChapter`,
+		`function prependChapter`,
+		`function ensureReaderScrollable`,
+		`readerState.canAutoLoad`,
+		`readerState.contentCache.clear()`,
+		`继续下滑加载下一章`,
+		`readerBody.addEventListener("scroll"`,
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("expected vertical reader scrolling to be removed, found %s", forbidden)
+		}
+	}
+
+	htmlData, err := templateFS.ReadFile("templates/index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	for _, needle := range []string{
+		`id="readerTransitionLayer"`,
+		`id="readerPageViewport"`,
+		`id="readerPageMeter"`,
+		`id="readerTransitionTitle"`,
+		`id="readerTransitionStatus"`,
+		`aria-live="polite"`,
+	} {
+		if !strings.Contains(string(htmlData), needle) {
+			t.Fatalf("expected reader transition markup to contain %s", needle)
+		}
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`.reader-page-viewport {`,
+		`.reader-page-meter {`,
+		`.reader-content.is-page-dragging`,
+		`column-fill: auto`,
+		`.reader-transition-layer {`,
+		`.reader-page-viewport.is-reader-leaving-next`,
+		`.reader-page-viewport.is-reader-entering-next`,
+		`.reader-transition-layer.is-ready`,
+		`@keyframes readerPageEnterNext`,
+		`@media (prefers-reduced-motion: reduce)`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected reader swipe transition style to contain %s", needle)
+		}
 	}
 }
 

@@ -538,7 +538,23 @@
       </section>
     </div>
     <div id="readerBody" class="reader-body">
-      <div id="readerContent" class="reader-content"></div>
+      <div id="readerPageViewport" class="reader-page-viewport">
+        <div id="readerContent" class="reader-content"></div>
+      </div>
+      <div id="readerPageMeter" class="reader-page-meter" aria-live="polite"></div>
+    </div>
+    <div id="readerTransitionLayer" class="reader-transition-layer" aria-live="polite" aria-atomic="true" hidden>
+      <section class="reader-transition-card">
+        <div class="reader-transition-meta">
+          <span id="readerTransitionKicker">下一章</span>
+          <span id="readerTransitionPosition"></span>
+        </div>
+        <strong id="readerTransitionTitle" class="reader-transition-title"></strong>
+        <span class="reader-transition-status">
+          <i aria-hidden="true"></i>
+          <span id="readerTransitionStatus">正在载入章节...</span>
+        </span>
+      </section>
     </div>
   </div>
 
