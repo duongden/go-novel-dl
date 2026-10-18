@@ -671,6 +671,26 @@ func TestReaderUsesPaginatedHorizontalChapterTransitions(t *testing.T) {
 	}
 }
 
+func TestReaderChapterTransitionsRetryAndPreservePositionOnFailure(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`const READER_CHAPTER_FETCH_ATTEMPTS = 2`,
+		`fetchChapterContentTextWithRetry(site, bookID, ch)`,
+		`failOnError: true`,
+		`updateReaderTitle(previousIndex)`,
+		`setReaderPagePosition(previousPage, { animate: false })`,
+		`章节请求暂时失败，已保留当前阅读位置，请再次翻页重试。`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected retryable reader chapter transition to contain %s", needle)
+		}
+	}
+}
+
 func TestMobileSearchResultStylesPreventLongTextOverflow(t *testing.T) {
 	styleData, err := templateFS.ReadFile("templates/style.css")
 	if err != nil {

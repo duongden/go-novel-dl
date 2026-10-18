@@ -2116,6 +2116,9 @@ const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v1";
 const READER_CONTENT_CACHE_LIMIT = 32;
 const READER_CONTENT_CACHE_MAX_CHARS = 2000000;
 const READER_PAGE_SWIPE_THRESHOLD = 52;
+const READER_CHAPTER_FETCH_ATTEMPTS = 2;
+const READER_CHAPTER_RETRY_BASE_MS = 360;
+const READER_PREFETCH_RETRY_COOLDOWN_MS = 2500;
 const READER_TRANSITION_SETTLE_MS = 260;
 const READER_TRANSITION_CACHED_MS = 120;
 const READER_TRANSITION_EXIT_MS = 360;
@@ -2127,6 +2130,7 @@ const readerState = {
   pending: new Map(),
   contentCache: loadReaderContentCache(),
   prefetched: new Set(),
+  prefetchBlockedUntil: new Map(),
   pageIndex: 0,
   pageCount: 1,
   pageWidth: 0,
@@ -2148,6 +2152,7 @@ function openReader(chapters, index, options = {}) {
   readerState.currentIndex = index;
   readerState.transitioning = false;
   readerState.prefetched.clear();
+  readerState.prefetchBlockedUntil.clear();
   readerState.pending.clear();
   readerState.pageIndex = 0;
   readerState.pageCount = 1;
@@ -2207,6 +2212,7 @@ async function renderReaderWindow(centerIndex, options = {}) {
     loadError = error && error.message ? error.message : "加载失败";
   }
   if (token !== readerState.token || readerOverlay.hidden) return false;
+  if (loadError && options.failOnError) throw new Error(loadError);
 
   readerContent.innerHTML = "";
   const divider = document.createElement("div");
@@ -2345,6 +2351,7 @@ function closeReader() {
   readerState.token += 1;
   readerState.pending.clear();
   readerState.prefetched.clear();
+  readerState.prefetchBlockedUntil.clear();
   flushReaderContentCache();
   clearReaderSession();
   if (appState.reader) {
@@ -2497,6 +2504,8 @@ async function transitionReaderChapter(direction) {
   hideReaderCatalog();
   flushProgressReport();
   const token = readerState.token;
+  const previousIndex = readerState.currentIndex;
+  const previousPage = readerState.pageIndex;
   const leavingClass = step > 0 ? "is-reader-leaving-next" : "is-reader-leaving-previous";
   const enteringClass = step > 0 ? "is-reader-entering-next" : "is-reader-entering-previous";
   const targetCached = isReaderChapterCached(targetIndex);
@@ -2508,7 +2517,30 @@ async function transitionReaderChapter(direction) {
   const startedAt = performance.now();
 
   try {
-    const rendered = await renderReaderWindow(targetIndex, { preserveContent: true, token });
+    let rendered = false;
+    try {
+      rendered = await renderReaderWindow(targetIndex, {
+        preserveContent: true,
+        token,
+        failOnError: true,
+      });
+    } catch (error) {
+      if (token !== readerState.token || readerOverlay.hidden) return;
+      console.warn("reader chapter transition failed", error);
+      readerState.prefetchBlockedUntil.set(
+        targetIndex,
+        performance.now() + READER_PREFETCH_RETRY_COOLDOWN_MS,
+      );
+      updateReaderTitle(previousIndex);
+      setReaderPagePosition(previousPage, { animate: false });
+      showToast(
+        step > 0 ? "下一章加载失败" : "上一章加载失败",
+        "章节请求暂时失败，已保留当前阅读位置，请再次翻页重试。",
+        "warning",
+        { durationMs: 5200 },
+      );
+      return;
+    }
     if (!rendered || token !== readerState.token || readerOverlay.hidden) return;
     const minimumWait = readerMotionReduced()
       ? 0
@@ -2619,8 +2651,9 @@ async function fetchChapterContentForReader(ch, index) {
   const variant = appState.activeDetailVariant || (appState.detailResult && appState.detailResult.primary) || {};
   const site = variant.site || ""; const bookID = variant.book_id || "";
   if (!site || !bookID) throw new Error("缺少站点信息");
-  const task = fetchChapterContentText(site, bookID, ch)
+  const task = fetchChapterContentTextWithRetry(site, bookID, ch)
     .then((content) => {
+      readerState.prefetchBlockedUntil.delete(index);
       rememberReaderChapterContent(key, content);
       return content;
     })
@@ -2633,6 +2666,9 @@ async function fetchChapterContentForReader(ch, index) {
 
 function prefetchReaderChapter(index) {
   if (index < 0 || index >= readerState.chapters.length || readerState.prefetched.has(index)) return;
+  const blockedUntil = Number(readerState.prefetchBlockedUntil.get(index) || 0);
+  if (blockedUntil > performance.now()) return;
+  readerState.prefetchBlockedUntil.delete(index);
   const chapter = readerState.chapters[index];
   if (!chapter) return;
   if (isReaderChapterCached(index)) {
@@ -2660,7 +2696,7 @@ function loadReaderContentCache() {
       if (!Array.isArray(entry) || entry.length !== 2) return;
       const key = String(entry[0] || "");
       const content = entry[1];
-      if (key && typeof content === "string") cache.set(key, content);
+      if (key && typeof content === "string" && content.trim()) cache.set(key, content);
     });
     pruneReaderContentCache(cache);
   } catch (_) {
@@ -2671,6 +2707,11 @@ function loadReaderContentCache() {
 function getReaderCachedChapterContent(key) {
   if (!readerState.contentCache.has(key)) return null;
   const content = readerState.contentCache.get(key);
+  if (typeof content !== "string" || !content.trim()) {
+    readerState.contentCache.delete(key);
+    scheduleReaderContentCachePersist();
+    return null;
+  }
   readerState.contentCache.delete(key);
   readerState.contentCache.set(key, content);
   scheduleReaderContentCachePersist();
@@ -2678,6 +2719,7 @@ function getReaderCachedChapterContent(key) {
 }
 
 function rememberReaderChapterContent(key, content) {
+  if (typeof content !== "string" || !content.trim()) return;
   readerState.contentCache.delete(key);
   readerState.contentCache.set(key, content);
   pruneReaderContentCache(readerState.contentCache);
@@ -2743,7 +2785,9 @@ function flushReaderContentCache() {
 
 function isReaderChapterCached(index) {
   const chapter = readerState.chapters[index];
-  return Boolean(chapter && readerState.contentCache.has(chapterReaderPendingKey(chapter, index)));
+  if (!chapter) return false;
+  const content = readerState.contentCache.get(chapterReaderPendingKey(chapter, index));
+  return typeof content === "string" && Boolean(content.trim());
 }
 
 async function fetchChapterContentText(site, bookID, ch) {
@@ -2758,7 +2802,41 @@ async function fetchChapterContentText(site, bookID, ch) {
     chapterLoadTimeoutMs(site),
     `${sourceLabel(site)} 章节加载超时，请稍后重试或切换来源`,
   );
-  return (data.chapter && data.chapter.content) || "";
+  const content = (data.chapter && data.chapter.content) || "";
+  if (!content.trim()) {
+    const error = new Error("章节内容为空");
+    error.retryable = true;
+    throw error;
+  }
+  return content;
+}
+
+async function fetchChapterContentTextWithRetry(site, bookID, ch) {
+  let lastError = null;
+  for (let attempt = 0; attempt < READER_CHAPTER_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchChapterContentText(site, bookID, ch);
+    } catch (error) {
+      lastError = error;
+      if (
+        attempt + 1 >= READER_CHAPTER_FETCH_ATTEMPTS
+        || !isRetryableReaderRequestError(error)
+      ) {
+        throw error;
+      }
+      await waitForReaderAnimation(READER_CHAPTER_RETRY_BASE_MS * (attempt + 1));
+    }
+  }
+  throw lastError || new Error("章节加载失败");
+}
+
+function isRetryableReaderRequestError(error) {
+  if (!error || error.retryable === false) return false;
+  const status = Number(error.status);
+  if (Number.isFinite(status) && status >= 400 && status < 500 && status !== 429) {
+    return false;
+  }
+  return true;
 }
 
 async function fetchJSONWithTimeout(resource, options, timeoutMs, timeoutMessage) {
@@ -2775,10 +2853,20 @@ async function fetchJSONWithTimeout(resource, options, timeoutMs, timeoutMessage
         throw new Error("接口返回内容不是 JSON");
       }
     }
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(data.error || `HTTP ${response.status}`);
+      error.status = response.status;
+      error.retryable = response.status === 429 || response.status >= 500;
+      throw error;
+    }
     return data;
   } catch (error) {
-    if (error && error.name === "AbortError") throw new Error(timeoutMessage || "请求超时");
+    if (error && error.name === "AbortError") {
+      const timeoutError = new Error(timeoutMessage || "请求超时");
+      timeoutError.retryable = true;
+      timeoutError.timedOut = true;
+      throw timeoutError;
+    }
     throw error;
   } finally {
     window.clearTimeout(timer);
