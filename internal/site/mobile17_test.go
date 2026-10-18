@@ -168,6 +168,30 @@ func TestMobile17DownloadPlanAndFetchChapter(t *testing.T) {
 	}
 }
 
+func TestMobile17ChapterContentCleansObfuscatedAds(t *testing.T) {
+	doc, err := parseHTML(`<html><body><div id="nr1">
+&nbsp;&nbsp;凌晨两点，程晓羽还在做与音乐相关的工作。шщш.LтｘＳdz.соｍ<br><br>
+&gt;ht\tｐ://www?ltxsdz?ｃｏｍ.ｃoｍ http://m.ltxswu.me/book/57430/<br><br>
+程晓羽再次恢复意识，已经不知道时间过去多久。最新?地址)&nbsp;Ltxsｄz.€ǒm<br><br>
+大飞在电视台做音乐总监。更多<img src="/zi/j1.png">彩<br><br>
+1.哥哥，我喜欢你啊。发布页Ltxsdz…℃〇M更多彩<br><br>
+走出酒吧正门，音乐声消失在脑后。『发布邮箱 Ltxs??A @ GmaiL.co??』<br><br>
+程晓羽的心里才平复一点。<dfn>Ltxsｄz.€ǒm.com</dfn><br><br>
+<div id="center_tip"><b>地址发布邮箱：ltxsba@gmail.com 发送任意邮件即可！</b></div>
+<font color="red">本章未完，请点击下一页继续阅读》》</font><br><br>
+正常结尾。
+</div></body></html>`)
+	if err != nil {
+		t.Fatalf("parse markup: %v", err)
+	}
+
+	got := strings.Join(mobileChapterParagraphs(doc), "\n")
+	want := "凌晨两点，程晓羽还在做与音乐相关的工作。\n程晓羽再次恢复意识，已经不知道时间过去多久。\n大飞在电视台做音乐总监。\n1.哥哥，我喜欢你啊。\n走出酒吧正门，音乐声消失在脑后。\n程晓羽的心里才平复一点。\n正常结尾。"
+	if got != want {
+		t.Fatalf("unexpected cleaned content:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestMobile17CloudflareChallengeDetected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

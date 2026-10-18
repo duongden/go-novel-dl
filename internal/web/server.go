@@ -1434,6 +1434,7 @@ func (s *Service) lookupChapterInLibrary(siteKey, bookID string, chapter model.C
 }
 
 func normalizeChapterForWeb(chapter model.Chapter, localeStyle string) model.Chapter {
+	chapter.Content = textconv.CleanAdContent(chapter.Content)
 	style := strings.ToLower(strings.TrimSpace(localeStyle))
 	if style == "" || style == "original" || style == "traditional" {
 		return chapter

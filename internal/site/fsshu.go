@@ -14,6 +14,7 @@ import (
 
 	"github.com/guohuiyuan/go-novel-dl/internal/config"
 	"github.com/guohuiyuan/go-novel-dl/internal/model"
+	"github.com/guohuiyuan/go-novel-dl/internal/textconv"
 )
 
 type FsshuSite struct {
@@ -284,6 +285,10 @@ func (s *FsshuSite) FetchChapter(ctx context.Context, bookID string, chapter mod
 			for _, txt := range strings.Split(cleanText(nodeTextPreserveLineBreaks(article)), "\n") {
 				txt = strings.TrimSpace(txt)
 				if txt == "" || isBiqugeAdLine(txt) || isFsshuPageIndicator(txt) {
+					continue
+				}
+				txt = textconv.CleanAdLine(txt)
+				if txt == "" {
 					continue
 				}
 				texts = append(texts, txt)

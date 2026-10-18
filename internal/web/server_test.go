@@ -809,6 +809,25 @@ func TestReaderCatalogJumpUsesChapterTransition(t *testing.T) {
 	}
 }
 
+func TestReaderPreviousChapterStartsAtLastPage(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`readerState.pinLastPage = false`,
+		`readerState.pinLastPage = Boolean(options.pinLastPage)`,
+		`pageIndex: readerState.pinLastPage ? Number.MAX_SAFE_INTEGER : 0`,
+		`const requestedPage = readerState.pinLastPage`,
+		`pinLastPage: step < 0 && !viaCatalog`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected previous chapter navigation to contain %s", needle)
+		}
+	}
+}
+
 func TestMobileSearchResultStylesPreventLongTextOverflow(t *testing.T) {
 	styleData, err := templateFS.ReadFile("templates/style.css")
 	if err != nil {
@@ -1221,6 +1240,18 @@ func TestSearchEndpointAppliesLocaleConversion(t *testing.T) {
 	}
 	if payload.Results[0].Title != "无职转生" {
 		t.Fatalf("expected simplified title, got %q", payload.Results[0].Title)
+	}
+}
+
+func TestNormalizeChapterForWebCleansObfuscatedAds(t *testing.T) {
+	chapter := model.Chapter{
+		Content: "第一段正文。\n>ht\\tｐ://www?ltxsdz?ｃｏｍ.ｃoｍ http://m.ltxswu.me/book/57430/\n凌晨两点，程晓羽还在做与音乐相关的工作。шщш.LтｘＳdz.соｍ\n1.哥哥，我喜欢你啊。发布页Ltxsdz…℃〇M更多彩\n第二段正文。",
+	}
+
+	got := normalizeChapterForWeb(chapter, "original")
+	want := "第一段正文。\n凌晨两点，程晓羽还在做与音乐相关的工作。\n1.哥哥，我喜欢你啊。\n第二段正文。"
+	if got.Content != want {
+		t.Fatalf("unexpected cleaned content:\n got: %q\nwant: %q", got.Content, want)
 	}
 }
 

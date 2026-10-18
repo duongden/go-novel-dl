@@ -14,6 +14,7 @@ import (
 
 	"github.com/guohuiyuan/go-novel-dl/internal/config"
 	"github.com/guohuiyuan/go-novel-dl/internal/model"
+	"github.com/guohuiyuan/go-novel-dl/internal/textconv"
 )
 
 // mobileUserAgent identifies requests as coming from a mobile browser.
@@ -22,11 +23,11 @@ import (
 const mobileUserAgent = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
 var (
-	mobileBookRe        = regexp.MustCompile(`^/book/(\d+)/?$`)
-	mobileChapterRe     = regexp.MustCompile(`^/book/(\d+)/([A-Za-z0-9]+)(?:_\d+)?\.html$`)
-	mobileChapterTitle  = regexp.MustCompile(`^(.*?)\s*\(第\s*[0-9]+\s*/\s*[0-9]+\s*页\)\s*$`)
-	mobileListPageRe    = regexp.MustCompile(`^/book/\d+_\d+/$`)
-	mobileDigitsRe      = regexp.MustCompile(`^\d+$`)
+	mobileBookRe       = regexp.MustCompile(`^/book/(\d+)/?$`)
+	mobileChapterRe    = regexp.MustCompile(`^/book/(\d+)/([A-Za-z0-9]+)(?:_\d+)?\.html$`)
+	mobileChapterTitle = regexp.MustCompile(`^(.*?)\s*\(第\s*[0-9]+\s*/\s*[0-9]+\s*页\)\s*$`)
+	mobileListPageRe   = regexp.MustCompile(`^/book/\d+_\d+/$`)
+	mobileDigitsRe     = regexp.MustCompile(`^\d+$`)
 )
 
 // mobile17Site 适配使用 17mb 手机模板的移动小说站：
@@ -374,25 +375,13 @@ func mobileChapterParagraphs(doc *html.Node) []string {
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(strings.ReplaceAll(line, "\u00a0", " "))
 		line = strings.Join(strings.Fields(line), " ")
-		if line == "" || mobileAdLine(line) {
+		line = textconv.CleanAdLine(line)
+		if line == "" {
 			continue
 		}
 		lines = append(lines, line)
 	}
 	return lines
-}
-
-func mobileAdLine(line string) bool {
-	lower := strings.ToLower(line)
-	for _, marker := range []string{
-		"地址发布", "请截图保存", "请记住本站", "请收藏本站",
-		"点击下一页", "本章未完", "手机访问", "加入书签", "返回目录",
-	} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "www.")
 }
 
 func mobileNextPageURL(doc *html.Node) string {

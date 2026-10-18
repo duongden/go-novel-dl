@@ -2356,7 +2356,7 @@ function ensureReaderPageViewport() {
 readerPageViewport = ensureReaderPageViewport();
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
-const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v1";
+const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v4";
 const READER_CONTENT_CACHE_LIMIT = 32;
 const READER_CONTENT_CACHE_MAX_CHARS = 2000000;
 const READER_PAGE_SWIPE_THRESHOLD = 52;
@@ -2378,6 +2378,7 @@ const readerState = {
   pageIndex: 0,
   pageCount: 1,
   pageWidth: 0,
+  pinLastPage: false,
   pageTurnToken: 0,
   touchStartX: null,
   touchStartY: null,
@@ -2405,6 +2406,7 @@ function openReader(chapters, index, options = {}) {
   readerState.pending.clear();
   readerState.pageIndex = 0;
   readerState.pageCount = 1;
+  readerState.pinLastPage = false;
   resetReaderSwipe();
   hideReaderTransition();
   pageViewport.classList.remove(
@@ -2477,8 +2479,14 @@ async function renderReaderWindow(centerIndex, options = {}) {
   } else {
     renderChapterBlock(block, content);
   }
+  if (options.pinLastPage !== undefined) {
+    readerState.pinLastPage = Boolean(options.pinLastPage);
+  }
   readerState.pageIndex = 0;
-  layoutReaderPages({ pageIndex: 0, animate: false });
+  layoutReaderPages({
+    pageIndex: readerState.pinLastPage ? Number.MAX_SAFE_INTEGER : 0,
+    animate: false,
+  });
   return true;
 }
 
@@ -2494,9 +2502,11 @@ function layoutReaderPages(options = {}) {
   readerContent.style.columnWidth = `${width}px`;
   readerContent.style.columnGap = "0px";
   readerState.pageCount = Math.max(1, Math.ceil((readerContent.scrollWidth - 0.5) / width));
-  const requestedPage = Number.isFinite(Number(options.pageIndex))
-    ? Math.floor(Number(options.pageIndex))
-    : readerState.pageIndex;
+  const requestedPage = readerState.pinLastPage
+    ? Number.MAX_SAFE_INTEGER
+    : (Number.isFinite(Number(options.pageIndex))
+      ? Math.floor(Number(options.pageIndex))
+      : readerState.pageIndex);
   setReaderPagePosition(requestedPage, { animate: Boolean(options.animate) });
 }
 
@@ -2558,6 +2568,7 @@ function scheduleReaderSessionPersist() {
 function turnReaderPage(direction) {
   if (readerOverlay.hidden || readerState.transitioning || readerState.touchDragging) return false;
   const step = Number(direction) < 0 ? -1 : 1;
+  readerState.pinLastPage = false;
   const targetPage = readerState.pageIndex + step;
   setReaderControlsVisible(false);
   if (targetPage >= 0 && targetPage < readerState.pageCount) {
@@ -2783,6 +2794,7 @@ async function transitionReaderChapter(direction, options = {}) {
         preserveContent: true,
         token,
         failOnError: true,
+        pinLastPage: step < 0 && !viaCatalog,
       });
     } catch (error) {
       if (token !== readerState.token || readerOverlay.hidden) return;

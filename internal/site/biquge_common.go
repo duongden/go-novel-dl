@@ -16,6 +16,7 @@ import (
 
 	"github.com/guohuiyuan/go-novel-dl/internal/config"
 	"github.com/guohuiyuan/go-novel-dl/internal/model"
+	"github.com/guohuiyuan/go-novel-dl/internal/textconv"
 )
 
 var biqugePagedIndexRe = regexp.MustCompile(`href=["'][^"']*index_(\d+)\.html`)
@@ -277,6 +278,10 @@ func (s *BiqugePagedSite) FetchChapter(ctx context.Context, bookID string, chapt
 			for _, txt := range strings.Split(cleanText(nodeTextPreserveLineBreaks(article)), "\n") {
 				txt = strings.TrimSpace(txt)
 				if txt == "" || isBiqugeAdLine(txt) || strings.Contains(txt, "页") && strings.Contains(txt, "第(") {
+					continue
+				}
+				txt = textconv.CleanAdLine(txt)
+				if txt == "" {
 					continue
 				}
 				texts = append(texts, txt)
