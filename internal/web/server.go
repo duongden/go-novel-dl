@@ -181,6 +181,12 @@ func newService(configPath string) (*Service, error) {
 
 	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	defaultSources := defaultAvailableDescriptors(allSources)
+	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources), sourceTagV2Defaults)
+	if err != nil {
+		return nil, fmt.Errorf("initialize source tags: %w", err)
+	}
+	applySourceTags(allSources, sourceTags)
+	applySourceTags(defaultSources, sourceTags)
 
 	pageSize := webPageSizeFromConfig(cfg)
 
@@ -227,6 +233,14 @@ func (s *Service) reloadRuntime() error {
 	}
 	s.Runtime = runtime
 	s.PageSize = webPageSizeFromConfig(cfg)
+	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
+	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources), sourceTagV2Defaults)
+	if err != nil {
+		return err
+	}
+	applySourceTags(allSources, sourceTags)
+	s.AllSources = allSources
+	s.DefaultSources = defaultAvailableDescriptors(allSources)
 	s.SiteWarnings = collectSiteWarnings(runtime)
 	s.SiteStats = collectSiteStats(runtime)
 	s.SiteConfigs, _ = config.ListSiteCatalog()
@@ -491,6 +505,35 @@ func newRouter(service *Service) *gin.Engine {
 			"site_warnings": service.SiteWarnings,
 			"site_stats":    service.SiteStats,
 		})
+	})
+	group.GET("/api/source-tags", func(c *gin.Context) {
+		items, err := config.ListSourceTags()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+	group.PUT("/api/source-tags/:site", func(c *gin.Context) {
+		siteKey := strings.ToLower(strings.TrimSpace(c.Param("site")))
+		if !service.hasSource(siteKey) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "source is not available"})
+			return
+		}
+		var req struct {
+			Tags []string `json:"tags"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+			return
+		}
+		item, err := config.UpdateSourceTags(siteKey, req.Tags)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		service.setSourceTags(siteKey, item.Tags)
+		c.JSON(http.StatusOK, gin.H{"item": item})
 	})
 	group.GET("/api/books/detail", func(c *gin.Context) {
 		siteKey := strings.TrimSpace(c.Query("site"))
@@ -1584,6 +1627,83 @@ func searchableDownloadDescriptors(items []site.SiteDescriptor) []site.SiteDescr
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func sourceTagDefaults(items []site.SiteDescriptor) map[string][]string {
+	defaults := make(map[string][]string, len(items))
+	for _, item := range items {
+		key := strings.ToLower(strings.TrimSpace(item.Key))
+		if key == "" {
+			continue
+		}
+		defaults[key] = append([]string(nil), item.Tags...)
+	}
+	return defaults
+}
+
+// sourceTagV2Defaults lets the tag migration distinguish untouched bundled
+// tags from edits made by users of the temporary curated-tag version.
+var sourceTagV2Defaults = map[string][]string{
+	"aaatxt":       {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
+	"alicesw":      {"简体中文", "转载站", "轻小说", "翻译", "成人向", "NSFW"},
+	"biquge345":    {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
+	"biquge5":      {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
+	"buguxs":       {"简体中文", "转载站", "网络小说", "免费"},
+	"ciweimao":     {"简体中文", "原创", "二次元", "轻小说", "同人二创", "付费"},
+	"ciyuanji":     {"简体中文", "原创", "二次元", "轻小说", "付费"},
+	"esjzone":      {"简体中文", "繁体中文", "转载站", "轻小说", "翻译", "成人向", "NSFW"},
+	"faloo":        {"简体中文", "原创", "网络小说", "付费", "飞卢", "男性向"},
+	"fanqienovel":  {"简体中文", "原创", "网络小说", "免费", "番茄小说", "抖音"},
+	"fsshu":        {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
+	"haiwaishubao": {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
+	"ixdzs8":       {"简体中文", "转载站", "网络小说", "免费"},
+	"kadokado":     {"繁体中文", "原创", "轻小说", "付费", "二次元"},
+	"linovel":      {"简体中文", "原创", "轻小说", "付费", "二次元"},
+	"linovelib":    {"简体中文", "转载站", "轻小说", "免费"},
+	"ltxswu":       {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
+	"n17k":         {"简体中文", "原创", "网络小说", "付费"},
+	"n8novel":      {"繁体中文", "转载站", "轻小说", "免费"},
+	"novalpie":     {"韩文", "原创", "付费", "网络小说", "成人向", "NSFW"},
+	"novelpia":     {"韩文", "原创", "付费", "网络小说", "成人向", "NSFW"},
+	"qidian":       {"简体中文", "原创", "网络小说", "付费", "起点", "阅文"},
+	"ruochu":       {"简体中文", "原创", "网络小说", "付费", "女性向"},
+	"sfacg":        {"简体中文", "原创", "二次元", "轻小说", "付费"},
+	"shuhaige":     {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
+	"tianyabooks":  {"简体中文", "转载站", "经典图书", "免费"},
+	"wenku8":       {"简体中文", "转载站", "轻小说", "免费"},
+	"yibige":       {"简体中文", "繁体中文", "转载站", "网络小说", "免费", "笔趣阁"},
+}
+
+func applySourceTags(items []site.SiteDescriptor, tagsBySource map[string][]string) {
+	for idx := range items {
+		tags, ok := tagsBySource[strings.ToLower(strings.TrimSpace(items[idx].Key))]
+		if !ok {
+			continue
+		}
+		items[idx].Tags = append([]string(nil), tags...)
+	}
+}
+
+func (s *Service) hasSource(siteKey string) bool {
+	siteKey = strings.ToLower(strings.TrimSpace(siteKey))
+	for _, item := range s.AllSources {
+		if strings.EqualFold(item.Key, siteKey) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) setSourceTags(siteKey string, tags []string) {
+	setDescriptorTags := func(items []site.SiteDescriptor) {
+		for idx := range items {
+			if strings.EqualFold(items[idx].Key, siteKey) {
+				items[idx].Tags = append([]string(nil), tags...)
+			}
+		}
+	}
+	setDescriptorTags(s.AllSources)
+	setDescriptorTags(s.DefaultSources)
 }
 
 // defaultAvailableDescriptors keeps only the descriptors whose key is in the

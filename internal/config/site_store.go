@@ -211,6 +211,10 @@ func ensureSiteCatalogDB() error {
 			siteCatalogErr = err
 			return
 		}
+		if err := db.AutoMigrate(&sourceTagEntry{}); err != nil {
+			siteCatalogErr = err
+			return
+		}
 		siteCatalogDB = db
 		if err := seedSiteCatalog(db); err != nil {
 			siteCatalogErr = err

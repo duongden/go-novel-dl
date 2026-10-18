@@ -112,9 +112,52 @@ func TestIndexPageIncludesSourceTagFilterControls(t *testing.T) {
 	}
 
 	body := resp.Body.String()
-	for _, needle := range []string{`id="sourceTagFilters"`, `id="clearTagFilters"`} {
+	for _, needle := range []string{
+		`id="sourceTagFilters"`,
+		`id="clearTagFilters"`,
+		`id="sourceTagEditorOverlay"`,
+		`id="sourceTagEditorSelected"`,
+		`id="sourceTagEditorSuggestions"`,
+		`id="sourceTagEditorSave"`,
+	} {
 		if !strings.Contains(body, needle) {
 			t.Fatalf("expected index page to contain %s, body=%s", needle, body)
+		}
+	}
+}
+
+func TestSourceTagEditorAssets(t *testing.T) {
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`.source-tag-edit-button {`,
+		`.source-tag-editor-overlay {`,
+		`.source-tag-editor-chip {`,
+		`.source-tag-editor-suggestions button {`,
+		`.source-option-shell:nth-child(4n+1) .source-option-key`,
+		`.source-option-shell:nth-child(4n+4) .source-option-key`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected source tag editor style to contain %s", needle)
+		}
+	}
+
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`async function saveSourceTagEditor()`,
+		`/api/source-tags/${encodeURIComponent(siteKey)}`,
+		`function refreshSourceTagSet()`,
+		`if (source) source.tags = savedTags.slice()`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected source tag editor script to contain %s", needle)
 		}
 	}
 }

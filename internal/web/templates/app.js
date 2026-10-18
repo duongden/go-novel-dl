@@ -48,7 +48,14 @@ const DEFAULT_COVER_SRC = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent
 
 const SEARCH_SOURCE_STATE_KEY = "novel-dl-search-source-state";
 const sourceKeySet = new Set(allSources.map((source) => source.key).filter(Boolean));
-const sourceTagSet = new Set(allSources.flatMap((source) => (Array.isArray(source.tags) ? source.tags : []).map((tag) => `${tag || ""}`.trim()).filter(Boolean)));
+let sourceTagSet = new Set();
+const SOURCE_TAG_SUGGESTIONS = [
+  "简体中文", "繁体中文", "日文", "韩文", "英文",
+  "原创", "转载站", "免费", "付费",
+  "网络小说", "轻小说", "经典图书", "二次元", "同人二创",
+  "男性向", "女性向", "成人向", "NSFW",
+];
+refreshSourceTagSet();
 const initialSearchSourceState = loadSearchSourceState();
 
 const appState = {
@@ -132,6 +139,17 @@ function normalizeSearchPageSize(value, fallback = defaultPageSize) {
 function setSearchPageSize(value, fallback = appState.pageSize) {
   appState.pageSize = normalizeSearchPageSize(value, fallback || defaultPageSize);
   return appState.pageSize;
+}
+
+function refreshSourceTagSet() {
+  sourceTagSet = new Set(
+    allSources.flatMap((source) => (
+      Array.isArray(source.tags)
+        ? source.tags.map((tag) => `${tag || ""}`.trim()).filter(Boolean)
+        : []
+    )),
+  );
+  return sourceTagSet;
 }
 
 function loadSearchSourceState() {
@@ -550,6 +568,23 @@ const speedTestStatusNode = document.getElementById("speedTestStatus");
 const sourceFiltersNode = document.getElementById("sourceFilters");
 const sourceFiltersToggleButton = document.getElementById("sourceFiltersToggle");
 const sourceFiltersToggleSummaryNode = document.getElementById("sourceFiltersToggleSummary");
+const sourceTagEditorOverlay = document.getElementById("sourceTagEditorOverlay");
+const sourceTagEditorBackdrop = document.getElementById("sourceTagEditorBackdrop");
+const sourceTagEditorCloseButton = document.getElementById("sourceTagEditorClose");
+const sourceTagEditorCancelButton = document.getElementById("sourceTagEditorCancel");
+const sourceTagEditorSaveButton = document.getElementById("sourceTagEditorSave");
+const sourceTagEditorTitleNode = document.getElementById("sourceTagEditorTitle");
+const sourceTagEditorKeyNode = document.getElementById("sourceTagEditorKey");
+const sourceTagEditorCountNode = document.getElementById("sourceTagEditorCount");
+const sourceTagEditorSelectedNode = document.getElementById("sourceTagEditorSelected");
+const sourceTagEditorSuggestionsNode = document.getElementById("sourceTagEditorSuggestions");
+const sourceTagEditorInputNode = document.getElementById("sourceTagEditorInput");
+const sourceTagEditorAddButton = document.getElementById("sourceTagEditorAdd");
+const sourceTagEditorStatusNode = document.getElementById("sourceTagEditorStatus");
+let sourceTagEditorSiteKey = "";
+let sourceTagEditorTags = [];
+let sourceTagEditorPreviousFocus = null;
+let sourceTagEditorSaving = false;
 const detailOverlay = document.getElementById("detailOverlay");
 const detailBackdrop = document.getElementById("detailBackdrop");
 const detailCloseButton = document.getElementById("detailCloseButton");
@@ -709,6 +744,22 @@ function bootstrap() {
   });
 
   setupSourceFiltersToggle();
+  if (sourceTagEditorBackdrop) sourceTagEditorBackdrop.addEventListener("click", closeSourceTagEditor);
+  if (sourceTagEditorCloseButton) sourceTagEditorCloseButton.addEventListener("click", closeSourceTagEditor);
+  if (sourceTagEditorCancelButton) sourceTagEditorCancelButton.addEventListener("click", closeSourceTagEditor);
+  if (sourceTagEditorAddButton) sourceTagEditorAddButton.addEventListener("click", () => addSourceTagEditorInput());
+  if (sourceTagEditorSaveButton) sourceTagEditorSaveButton.addEventListener("click", () => void saveSourceTagEditor());
+  if (sourceTagEditorInputNode) {
+    sourceTagEditorInputNode.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === "," || event.key === "，") {
+        event.preventDefault();
+        addSourceTagEditorInput();
+      } else if (event.key === "Backspace" && !sourceTagEditorInputNode.value && sourceTagEditorTags.length) {
+        sourceTagEditorTags.pop();
+        renderSourceTagEditor();
+      }
+    });
+  }
 
   const goPrevPage = async () => {
     if (!appState.hasPrev || !appState.lastKeyword) return;
@@ -768,6 +819,7 @@ function bootstrap() {
   });
   
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !sourceTagEditorOverlay.hidden) { closeSourceTagEditor(); return; }
     if (event.key === "Escape" && !readerOverlay.hidden) { closeReader(); return; }
     if (event.key === "Escape" && !detailOverlay.hidden) closeDetail();
     if (event.key === "Escape" && !siteConfigOverlay.hidden) closeSiteConfig();
@@ -886,6 +938,9 @@ function renderSourceSelector() {
   }
 
   visibleSources.forEach((source) => {
+    const shell = document.createElement("div");
+    shell.className = "source-option-shell";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "source-option";
@@ -916,10 +971,178 @@ function renderSourceSelector() {
     button.appendChild(key);
     button.appendChild(tags);
     button.addEventListener("click", () => toggleSource(source.key));
-    sourceSelectorNode.appendChild(button);
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "source-tag-edit-button";
+    editButton.title = `编辑 ${source.display_name || source.key} 的标签`;
+    editButton.setAttribute("aria-label", editButton.title);
+    editButton.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41 12 22l-9-9V4a2 2 0 0 1 2-2h9l6.59 6.59a2 2 0 0 1 0 2.82z"></path><circle cx="7.5" cy="7.5" r=".75" fill="currentColor" stroke="none"></circle></svg>`;
+    editButton.addEventListener("click", () => openSourceTagEditor(source.key));
+
+    shell.append(button, editButton);
+    sourceSelectorNode.appendChild(shell);
   });
   sourceSummaryNode.textContent = sourceSummaryText(visibleSources.length);
   refreshSourceFiltersToggleSummary();
+}
+
+function openSourceTagEditor(siteKey) {
+  const source = allSources.find((item) => item.key === siteKey);
+  if (!source || !sourceTagEditorOverlay) return;
+  sourceTagEditorSiteKey = siteKey;
+  sourceTagEditorTags = sourceTags(source);
+  sourceTagEditorPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  sourceTagEditorTitleNode.textContent = source.display_name || source.key;
+  sourceTagEditorKeyNode.textContent = source.key;
+  sourceTagEditorInputNode.value = "";
+  setSourceTagEditorStatus("");
+  renderSourceTagEditor();
+  hideTemporaryWarningDialog();
+  sourceTagEditorOverlay.hidden = false;
+  document.body.classList.add("has-overlay");
+  window.requestAnimationFrame(() => sourceTagEditorInputNode.focus({ preventScroll: true }));
+}
+
+function closeSourceTagEditor() {
+  if (!sourceTagEditorOverlay || sourceTagEditorOverlay.hidden || sourceTagEditorSaving) return;
+  sourceTagEditorOverlay.hidden = true;
+  sourceTagEditorSiteKey = "";
+  sourceTagEditorTags = [];
+  if (siteConfigOverlay.hidden && detailOverlay.hidden && readerOverlay.hidden) {
+    document.body.classList.remove("has-overlay");
+  }
+  const focusTarget = sourceTagEditorPreviousFocus;
+  sourceTagEditorPreviousFocus = null;
+  if (focusTarget && focusTarget.isConnected) focusTarget.focus({ preventScroll: true });
+}
+
+function renderSourceTagEditor() {
+  if (!sourceTagEditorSelectedNode || !sourceTagEditorSuggestionsNode) return;
+  sourceTagEditorCountNode.textContent = `${sourceTagEditorTags.length} / 16`;
+  sourceTagEditorSelectedNode.innerHTML = "";
+  if (!sourceTagEditorTags.length) {
+    const empty = document.createElement("div");
+    empty.className = "source-tag-editor-chip-empty";
+    empty.textContent = "暂未设置标签，添加后可用于渠道筛选。";
+    sourceTagEditorSelectedNode.appendChild(empty);
+  } else {
+    sourceTagEditorTags.forEach((tagText) => {
+      const chip = document.createElement("span");
+      chip.className = "source-tag-editor-chip";
+      const label = document.createElement("span");
+      label.textContent = tagText;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移除标签 ${tagText}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        sourceTagEditorTags = sourceTagEditorTags.filter((item) => item !== tagText);
+        setSourceTagEditorStatus("");
+        renderSourceTagEditor();
+      });
+      chip.append(label, remove);
+      sourceTagEditorSelectedNode.appendChild(chip);
+    });
+  }
+
+  sourceTagEditorSuggestionsNode.innerHTML = "";
+  const suggestions = [...SOURCE_TAG_SUGGESTIONS];
+  sourceTagCatalog()
+    .sort((left, right) => right.count - left.count)
+    .forEach((item) => {
+      if (!suggestions.includes(item.label)) suggestions.push(item.label);
+    });
+  suggestions.slice(0, 30).forEach((tagText) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = tagText;
+    button.disabled = sourceTagEditorTags.includes(tagText);
+    button.addEventListener("click", () => addSourceTagEditorValue(tagText));
+    sourceTagEditorSuggestionsNode.appendChild(button);
+  });
+}
+
+function addSourceTagEditorInput() {
+  if (!sourceTagEditorInputNode) return false;
+  const added = addSourceTagEditorValue(sourceTagEditorInputNode.value);
+  if (added) sourceTagEditorInputNode.value = "";
+  return added;
+}
+
+function addSourceTagEditorValue(rawValue) {
+  const tagText = `${rawValue || ""}`.trim();
+  if (!tagText) return false;
+  if (tagText.length > 24) {
+    setSourceTagEditorStatus("单个标签不能超过 24 个字符。", "error");
+    return false;
+  }
+  if (sourceTagEditorTags.includes(tagText)) {
+    setSourceTagEditorStatus("这个标签已经在当前渠道中。", "error");
+    return false;
+  }
+  if (sourceTagEditorTags.length >= 16) {
+    setSourceTagEditorStatus("每个渠道最多设置 16 个标签。", "error");
+    return false;
+  }
+  sourceTagEditorTags.push(tagText);
+  setSourceTagEditorStatus("");
+  renderSourceTagEditor();
+  if (sourceTagEditorInputNode) sourceTagEditorInputNode.focus({ preventScroll: true });
+  return true;
+}
+
+function setSourceTagEditorStatus(text, tone = "") {
+  if (!sourceTagEditorStatusNode) return;
+  sourceTagEditorStatusNode.textContent = text;
+  if (tone) sourceTagEditorStatusNode.dataset.tone = tone;
+  else delete sourceTagEditorStatusNode.dataset.tone;
+}
+
+async function saveSourceTagEditor() {
+  if (!sourceTagEditorSiteKey || sourceTagEditorSaving) return;
+  if (sourceTagEditorInputNode && sourceTagEditorInputNode.value.trim()) {
+    if (!addSourceTagEditorInput()) return;
+  }
+  sourceTagEditorSaving = true;
+  if (sourceTagEditorSaveButton) {
+    sourceTagEditorSaveButton.disabled = true;
+    sourceTagEditorSaveButton.textContent = "保存中...";
+  }
+  setSourceTagEditorStatus("正在写入本地标签数据库...", "info");
+  const siteKey = sourceTagEditorSiteKey;
+  try {
+    const response = await fetch(`${root}/api/source-tags/${encodeURIComponent(siteKey)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags: sourceTagEditorTags }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "标签保存失败");
+    const savedTags = Array.isArray(payload.item && payload.item.tags) ? payload.item.tags : sourceTagEditorTags;
+    const source = allSources.find((item) => item.key === siteKey);
+    if (source) source.tags = savedTags.slice();
+    refreshSourceTagSet();
+    appState.selectedSourceTags = new Set(
+      Array.from(appState.selectedSourceTags).filter((tagText) => sourceTagSet.has(tagText)),
+    );
+    pruneSelectedSitesByVisibleSources();
+    saveSearchSourceState();
+    renderSourceTagFilters();
+    renderSourceSelector();
+    sourceTagEditorSaving = false;
+    closeSourceTagEditor();
+    showToast("渠道标签已保存", `${sourceLabel(siteKey)} 的标签已写入本地数据库。`, "success");
+    setStatus(`已更新 ${sourceLabel(siteKey)} 的标签，可继续使用标签组合筛选渠道。`);
+  } catch (error) {
+    setSourceTagEditorStatus(`保存失败：${error.message}`, "error");
+  } finally {
+    sourceTagEditorSaving = false;
+    if (sourceTagEditorSaveButton) {
+      sourceTagEditorSaveButton.disabled = false;
+      sourceTagEditorSaveButton.textContent = "保存标签";
+    }
+  }
 }
 
 function renderSourceSpeedBadge(siteKey) {
