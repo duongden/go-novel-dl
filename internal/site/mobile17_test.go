@@ -192,6 +192,62 @@ func TestMobile17ChapterContentCleansObfuscatedAds(t *testing.T) {
 	}
 }
 
+func TestMobile17CharacterImageMap(t *testing.T) {
+	tests := []struct {
+		code string
+		want string
+	}{
+		{"a1", "爱"}, {"b1", "爆"}, {"b2", "暴"}, {"b3", "屄"}, {"b4", "棒"}, {"b5", "逼"}, {"b6", "巴"},
+		{"c1", "草"}, {"c2", "操"}, {"c3", "插"}, {"c4", "肏"}, {"c5", "潮"},
+		{"d1", "荡"}, {"d2", "屌"}, {"d3", "洞"},
+		{"f1", "妇"}, {"f2", "粉"},
+		{"g1", "肛"}, {"g2", "龟"}, {"g3", "干"}, {"g4", "股"},
+		{"j1", "精"}, {"j2", "奸"}, {"j3", "交"}, {"j4", "鸡"}, {"j5", "妓"},
+		{"k1", "口"},
+		{"l1", "轮"}, {"l2", "浪"}, {"l3", "乱"}, {"l4", "裸"},
+		{"n1", "奶"}, {"n2", "女"}, {"n3", "嫩"}, {"n4", "奴"},
+		{"p1", "喷"}, {"p2", "破"}, {"p3", "屁"},
+		{"q1", "情"},
+		{"r1", "肉"}, {"r2", "乳"}, {"r3", "人"}, {"r4", "入"}, {"r5", "日"},
+		{"s1", "射"}, {"s2", "深"},
+		{"t1", "头"}, {"t2", "臀"},
+		{"x1", "穴"}, {"x2", "性"},
+		{"y1", "液"}, {"y2", "淫"}, {"y3", "阴"},
+	}
+	if got := len(mobile17CharacterImages); got != len(tests) {
+		t.Fatalf("unexpected character image count: got %d want %d", got, len(tests))
+	}
+	for _, tc := range tests {
+		t.Run(tc.code, func(t *testing.T) {
+			doc, err := parseHTML(`<html><body><div id="nr1">前<img src="/zi/` + tc.code + `.png">后</div></body></html>`)
+			if err != nil {
+				t.Fatalf("parse markup: %v", err)
+			}
+			got := strings.Join(mobileChapterParagraphs(doc), "\n")
+			want := "前" + tc.want + "后"
+			if got != want {
+				t.Fatalf("unexpected restored character: got %q want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestMobile17RestoresCharacterImages(t *testing.T) {
+	doc, err := parseHTML(`<html><body><div id="nr1">
+出到达<img src="/zi/k1.png">，在<img src="/zi/r3.png">群里回<img src="/zi/t1.png">。
+<div><img src="http://m.ltxswu.me/zi/n2.png"><img src="/zi/y1.png"><img src="/zi/unknown.png"></div>
+</div></body></html>`)
+	if err != nil {
+		t.Fatalf("parse markup: %v", err)
+	}
+
+	got := strings.Join(mobileChapterParagraphs(doc), "\n")
+	want := "出到达口，在人群里回头。\n女液[字图:unknown]"
+	if got != want {
+		t.Fatalf("unexpected restored content:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestMobile17CloudflareChallengeDetected(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

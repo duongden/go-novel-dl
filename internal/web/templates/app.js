@@ -129,6 +129,14 @@ const appState = {
   generalConfig: initialGeneralConfig,
 };
 
+let appURLSyncTimer = 0;
+let appURLRestoring = false;
+const APP_URL_KEYS = [
+  "view", "q", "mode", "page", "sites", "tags",
+  "site", "book_id", "chapter_id", "chapter_url", "chapter_index",
+  "chapter_page", "chapter_size", "local", "title", "folder", "panel",
+];
+
 function normalizeSearchPageSize(value, fallback = defaultPageSize) {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (parsed > 0) return parsed;
@@ -177,6 +185,7 @@ function saveSearchSourceState() {
     }));
   } catch (_) {
   }
+  scheduleAppURLSync();
 }
 
 function renderSiteWarnings() {
@@ -834,10 +843,10 @@ function bootstrap() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
-  window.setTimeout(() => void restoreReaderSession(), 0);
+  window.setTimeout(() => void restoreAppFromLocation(), 0);
 }
 
-function activateTab(tabName) {
+function activateTab(tabName, options = {}) {
   if (tabName !== "search" && tabName !== "favorites") tabName = "search";
   appState.activeTab = tabName;
   searchTabButton.classList.toggle("is-active", tabName === "search");
@@ -845,11 +854,12 @@ function activateTab(tabName) {
   searchTabPanel.classList.toggle("is-active", tabName === "search");
   if (favoritesTabPanel) favoritesTabPanel.classList.toggle("is-active", tabName === "favorites");
   if (tabName === "favorites") {
-    activateSubTab(appState.activeSubTab || "bookshelf");
+    activateSubTab(appState.activeSubTab || "bookshelf", options);
   }
+  if (options.syncURL !== false) scheduleAppURLSync();
 }
 
-function activateSubTab(subTabName) {
+function activateSubTab(subTabName, options = {}) {
   if (subTabName !== "bookshelf" && subTabName !== "history" && subTabName !== "tasks") subTabName = "bookshelf";
   appState.activeSubTab = subTabName;
   if (bookshelfSubTab) bookshelfSubTab.classList.toggle("is-active", subTabName === "bookshelf");
@@ -858,13 +868,14 @@ function activateSubTab(subTabName) {
   if (bookshelfSubPanel) bookshelfSubPanel.classList.toggle("is-active", subTabName === "bookshelf");
   if (historySubPanel) historySubPanel.classList.toggle("is-active", subTabName === "history");
   if (tasksSubPanel) tasksSubPanel.classList.toggle("is-active", subTabName === "tasks");
-  if (subTabName === "bookshelf" && !appState.bookshelf.loading) {
+  if (subTabName === "bookshelf" && !appState.bookshelf.loading && options.load !== false) {
     // 每次切到书架都自动刷新，确保任务/外部修改后内容始终最新
     void loadBookshelf(appState.bookshelf.parentId);
   }
-  if (subTabName === "history" && !appState.history.loaded) {
+  if (subTabName === "history" && !appState.history.loaded && options.load !== false) {
     void loadHistory();
   }
+  if (options.syncURL !== false) scheduleAppURLSync();
 }
 
 async function performSearch(exact = appState.lastExact) {
@@ -879,6 +890,7 @@ async function performSearch(exact = appState.lastExact) {
   appState.lastKeyword = keyword;
   appState.lastExact = useExact;
   activateTab("search");
+  scheduleAppURLSync();
   renderWarnings([]);
   setStatus(`正在${useExact ? "精确搜索" : "模糊搜索"}“${keyword}”，第 ${appState.page} 页...`);
 
@@ -1770,6 +1782,7 @@ function openDetailPage(result, variant, chapterPage = 1, resetScroll = false) {
   appState.activeDetailPageSize = pageSize;
   detailOverlay.hidden = false;
   document.body.classList.add("has-overlay");
+  scheduleAppURLSync();
   const detailPanel = detailContentNode.closest(".detail-panel");
   if (detailPanel && resetScroll) detailPanel.scrollTop = 0;
 
@@ -1782,6 +1795,7 @@ function openDetailPage(result, variant, chapterPage = 1, resetScroll = false) {
 
 function closeDetail() {
   detailOverlay.hidden = true; document.body.classList.remove("has-overlay");
+  scheduleAppURLSync();
 }
 
 async function loadDetail(result, variant, cacheKey, chapterPage = 1, chapterPageSize = normalizedChapterPageSize()) {
@@ -2356,7 +2370,7 @@ function ensureReaderPageViewport() {
 readerPageViewport = ensureReaderPageViewport();
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
-const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v4";
+const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v5";
 const READER_CONTENT_CACHE_LIMIT = 32;
 const READER_CONTENT_CACHE_MAX_CHARS = 2000000;
 const READER_PAGE_SWIPE_THRESHOLD = 52;
@@ -2392,6 +2406,242 @@ let readerControlsHideTimer = 0;
 let readerPageLayoutFrame = 0;
 let readerContentCachePersistTimer = 0;
 
+function readAppURLState() {
+  const params = new URLSearchParams(window.location.search);
+  let view = String(params.get("view") || "").trim().toLowerCase();
+  if (!["search", "favorites", "bookshelf", "history", "tasks", "detail", "reader", "settings"].includes(view)) {
+    if (params.get("chapter_id") || params.get("chapter_url")) view = "reader";
+    else if (params.get("book_id")) view = "detail";
+    else if (params.get("q")) view = "search";
+    else view = "";
+  }
+  return { params, view };
+}
+
+function setAppURLState(state) {
+  if (appURLRestoring) return;
+  const url = new URL(window.location.href);
+  APP_URL_KEYS.forEach((key) => url.searchParams.delete(key));
+  Object.entries(state).forEach(([key, value]) => {
+    if (!APP_URL_KEYS.includes(key)) return;
+    const text = value === null || value === undefined ? "" : String(value).trim();
+    if (text) url.searchParams.set(key, text);
+  });
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next === current) return;
+  window.history.replaceState(window.history.state, "", next);
+}
+
+function syncAppURL() {
+  if (appURLRestoring) return;
+  const readerSnapshot = readerOverlay && !readerOverlay.hidden ? currentReaderSnapshot() : null;
+  if (readerSnapshot) {
+    setAppURLState({
+      view: "reader",
+      site: readerSnapshot.site,
+      book_id: readerSnapshot.book_id,
+      chapter_id: readerSnapshot.chapter_id,
+      chapter_url: readerSnapshot.chapter_id ? "" : readerSnapshot.chapter_url,
+      chapter_index: readerSnapshot.chapter_index,
+      page: readerSnapshot.page_index + 1,
+      title: readerSnapshot.title,
+      local: readerSnapshot.local_only ? "1" : "",
+    });
+    return;
+  }
+
+  if (siteConfigOverlay && !siteConfigOverlay.hidden) {
+    setAppURLState({
+      view: "settings",
+      panel: settingsActivePanel,
+      site: settingsActivePanel === "site" && siteConfigKeyNode ? siteConfigKeyNode.value : "",
+    });
+    return;
+  }
+
+  const detailVariant = appState.activeDetailVariant;
+  if (detailOverlay && !detailOverlay.hidden && detailVariant && detailVariant.site && detailVariant.book_id) {
+    setAppURLState({
+      view: "detail",
+      site: detailVariant.site,
+      book_id: detailVariant.book_id,
+      chapter_page: appState.activeDetailPage || 1,
+      chapter_size: appState.activeDetailPageSize || normalizedChapterPageSize(),
+      local: detailVariant.local ? "1" : "",
+    });
+    return;
+  }
+
+  if (appState.activeTab === "favorites") {
+    const state = { view: appState.activeSubTab || "bookshelf" };
+    if (state.view === "bookshelf") {
+      state.folder = appState.bookshelf.parentId || "";
+      state.page = appState.bookshelf.page || 1;
+    } else if (state.view === "history") {
+      state.page = appState.history.page || 1;
+    } else {
+      state.page = appState.tasksPage || 1;
+    }
+    setAppURLState(state);
+    return;
+  }
+
+  const searchState = { view: "search" };
+  if (appState.lastKeyword) {
+    searchState.q = appState.lastKeyword;
+    searchState.mode = appState.lastExact ? "exact" : "fuzzy";
+    searchState.page = appState.page || 1;
+    searchState.sites = Array.from(appState.selectedSites).join(",");
+    searchState.tags = Array.from(appState.selectedSourceTags).join(",");
+  }
+  setAppURLState(searchState);
+}
+
+function scheduleAppURLSync() {
+  if (appURLRestoring) return;
+  if (appURLSyncTimer) window.clearTimeout(appURLSyncTimer);
+  appURLSyncTimer = window.setTimeout(() => {
+    appURLSyncTimer = 0;
+    syncAppURL();
+  }, 80);
+}
+
+function urlPositiveInt(params, key, fallback = 1) {
+  const value = Number.parseInt(String(params.get(key) || ""), 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function urlVariant(params) {
+  const site = String(params.get("site") || "").trim();
+  const bookID = String(params.get("book_id") || "").trim();
+  if (!site || !bookID) return null;
+  return {
+    site,
+    book_id: bookID,
+    local: params.get("local") === "1",
+  };
+}
+
+function syntheticDetailResult(variant, book = {}) {
+  return {
+    title: book.title || "",
+    author: book.author || "",
+    cover_url: book.cover_url || "",
+    description: book.description || "",
+    latest_chapter: book.latest_chapter || "",
+    url: book.source_url || "",
+    primary: variant,
+    sources: [variant],
+    source_count: 1,
+  };
+}
+
+async function restoreSearchFromURL(params) {
+  const keyword = String(params.get("q") || "").trim();
+  const siteKeys = String(params.get("sites") || "").split(",").map((item) => item.trim()).filter((item) => sourceKeySet.has(item));
+  const tags = String(params.get("tags") || "").split(",").map((item) => item.trim()).filter((item) => sourceTagSet.has(item));
+  if (siteKeys.length) appState.selectedSites = new Set(siteKeys);
+  if (tags.length) appState.selectedSourceTags = new Set(tags);
+  renderSourceTagFilters();
+  renderSourceSelector();
+  keywordInput.value = keyword;
+  const exact = params.get("mode") === "exact";
+  if (searchModeSelect) searchModeSelect.value = exact ? "exact" : "fuzzy";
+  appState.page = urlPositiveInt(params, "page", 1);
+  if (!keyword) {
+    activateTab("search", { syncURL: false });
+    return;
+  }
+  await performSearch(exact);
+}
+
+async function restoreFavoritesFromURL(view, params) {
+  const subTab = view === "favorites" ? String(params.get("tab") || "bookshelf") : view;
+  activateTab("favorites", { load: false, syncURL: false });
+  activateSubTab(subTab, { load: false, syncURL: false });
+  if (appState.activeSubTab === "bookshelf") {
+    const folder = urlPositiveInt(params, "folder", 0) || null;
+    await loadBookshelf(folder);
+    appState.bookshelf.page = urlPositiveInt(params, "page", 1);
+    renderBookshelf();
+  } else if (appState.activeSubTab === "history") {
+    await loadHistory();
+    appState.history.page = urlPositiveInt(params, "page", 1);
+    renderHistory();
+  } else {
+    await hydrateTasksFromServer();
+    appState.tasksPage = urlPositiveInt(params, "page", 1);
+    renderTasks();
+  }
+}
+
+async function restoreDetailFromURL(params) {
+  const variant = urlVariant(params);
+  if (!variant) throw new Error("详情链接缺少 site 或 book_id");
+  const chapterPage = urlPositiveInt(params, "chapter_page", 1);
+  const requestedSize = urlPositiveInt(params, "chapter_size", normalizedChapterPageSize());
+  if ([50, 100, 200, 500].includes(requestedSize)) {
+    appState.chapterPageSize = requestedSize;
+    appState.activeDetailPageSize = requestedSize;
+  }
+  const detail = await fetchBookDetail(variant, chapterPage, normalizedChapterPageSize(), { local: variant.local });
+  if (!detail || !detail.book) throw new Error("详情数据为空");
+  appState.detailCache.set(detailRequestKey(variant, chapterPage, normalizedChapterPageSize()), detail);
+  openDetailPage(syntheticDetailResult(variant, detail.book), variant, chapterPage, true);
+}
+
+async function restoreReaderFromURL(params) {
+  const variant = urlVariant(params);
+  if (!variant) throw new Error("阅读链接缺少 site 或 book_id");
+  const chapterID = String(params.get("chapter_id") || "").trim();
+  const chapterURL = String(params.get("chapter_url") || "").trim();
+  const item = {
+    site: variant.site,
+    book_id: variant.book_id,
+    title: String(params.get("title") || "").trim(),
+    last_read_chapter_id: chapterID || chapterURL,
+    last_read_chapter_index: Math.max(0, Number.parseInt(String(params.get("chapter_index") || "0"), 10) || 0),
+    last_read_chapter_title: "",
+    source_url: "",
+    local_only: variant.local,
+  };
+  const restored = await openBookshelfReader(item, null, {
+    readerOptions: { pageIndex: urlPositiveInt(params, "page", 1) - 1 },
+  });
+  if (!restored) throw new Error("阅读器章节加载失败");
+}
+
+async function restoreAppFromLocation() {
+  const { params, view } = readAppURLState();
+  if (!view) {
+    await restoreReaderSession();
+    syncAppURL();
+    return;
+  }
+
+  appURLRestoring = true;
+  try {
+    if (view === "search") {
+      await restoreSearchFromURL(params);
+    } else if (["favorites", "bookshelf", "history", "tasks"].includes(view)) {
+      await restoreFavoritesFromURL(view, params);
+    } else if (view === "detail") {
+      await restoreDetailFromURL(params);
+    } else if (view === "reader") {
+      await restoreReaderFromURL(params);
+    } else if (view === "settings") {
+      await openSiteConfig({ panel: params.get("panel") || undefined, siteKey: params.get("site") || "" });
+    }
+  } catch (error) {
+    activateTab("search", { syncURL: false });
+    setStatus(`URL 状态恢复失败：${error.message}`, "error");
+  } finally {
+    appURLRestoring = false;
+    syncAppURL();
+  }
+}
+
 function openReader(chapters, index, options = {}) {
   const pageViewport = ensureReaderPageViewport();
   if (!readerOverlay || !readerContent || !pageViewport) {
@@ -2420,6 +2670,7 @@ function openReader(chapters, index, options = {}) {
     : 0;
   const token = ++readerState.token;
   readerOverlay.hidden = false;
+  scheduleAppURLSync();
   setReaderControlsVisible(false);
   hideReaderCatalog();
 
@@ -2629,6 +2880,7 @@ function closeReader() {
     appState.reader.localOnly = false;
     appState.reader.lastReportedChapterID = "";
   }
+  syncAppURL();
 }
 
 function updateReaderTitle(index) {
@@ -3357,6 +3609,7 @@ function persistReaderSession() {
     window.sessionStorage.setItem(READER_SESSION_KEY, JSON.stringify(snapshot));
   } catch (_) {
   }
+  syncAppURL();
 }
 
 function clearReaderSession() {
@@ -3751,6 +4004,7 @@ function renderSubPagination(node, prevBtn, nextBtn, indicator, info) {
 }
 
 function renderTasks() {
+  scheduleAppURLSync();
   const tasks = Array.from(appState.tasks.values()).sort((l, r) => new Date(r.updated_at).getTime() - new Date(l.updated_at).getTime());
   if (taskCountNode) taskCountNode.textContent = String(tasks.length);
   if (taskTabCountNode) taskTabCountNode.textContent = String(tasks.length);
@@ -4234,6 +4488,7 @@ function activateSettingsPanel(panelKey, options = {}) {
     panel.hidden = panel.id !== `settingsPanel${nextKey[0].toUpperCase()}${nextKey.slice(1)}`;
   });
   if (options.scroll !== false && settingsContentNode) settingsContentNode.scrollTop = 0;
+  if (siteConfigOverlay && !siteConfigOverlay.hidden) scheduleAppURLSync();
 }
 
 async function openSiteConfig(options = {}) {
@@ -4246,6 +4501,7 @@ async function openSiteConfig(options = {}) {
   activateSettingsPanel(panelKey, { scroll: false });
   siteConfigOverlay.hidden = false;
   document.body.classList.add("has-overlay");
+  scheduleAppURLSync();
   setSettingsSaveStatus("");
   window.requestAnimationFrame(() => {
     const activeTab = settingsTabs.find((tab) => tab.dataset.settingsTab === settingsActivePanel);
@@ -4259,6 +4515,7 @@ async function openSiteConfig(options = {}) {
     if (requestedSiteKey && appState.siteConfigs.has(requestedSiteKey)) {
       siteConfigKeyNode.value = requestedSiteKey;
       populateSiteConfigForm(requestedSiteKey);
+      scheduleAppURLSync();
     }
   } catch (error) {
     setSettingsSaveStatus(`设置刷新失败：${error.message}`, "error");
@@ -4268,6 +4525,7 @@ async function openSiteConfig(options = {}) {
 function closeSiteConfig() {
   siteConfigOverlay.hidden = true;
   document.body.classList.remove("has-overlay");
+  syncAppURL();
   const focusTarget = settingsPreviousFocus;
   settingsPreviousFocus = null;
   if (focusTarget && focusTarget.isConnected) focusTarget.focus({ preventScroll: true });
@@ -4512,6 +4770,7 @@ function renderBookshelfBreadcrumb() {
 
 function renderBookshelf() {
   if (!bookshelfNode) return;
+  scheduleAppURLSync();
   bookshelfNode.innerHTML = "";
   const items = appState.bookshelf.items;
   if (!items.length) {
@@ -4566,6 +4825,7 @@ async function loadHistory() {
 
 function renderHistory() {
   if (!historyListNode) return;
+  scheduleAppURLSync();
   historyListNode.innerHTML = "";
   const items = appState.history.items;
   if (!items.length) {

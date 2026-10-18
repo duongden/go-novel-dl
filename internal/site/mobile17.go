@@ -28,6 +28,64 @@ var (
 	mobileChapterTitle = regexp.MustCompile(`^(.*?)\s*\(第\s*[0-9]+\s*/\s*[0-9]+\s*页\)\s*$`)
 	mobileListPageRe   = regexp.MustCompile(`^/book/\d+_\d+/$`)
 	mobileDigitsRe     = regexp.MustCompile(`^\d+$`)
+	mobileCharImageRe  = regexp.MustCompile(`(?:^|/)zi/([A-Za-z0-9_-]+)\.png$`)
+	// 17mb 手机模板会把部分汉字替换成 /zi/<code>.png，码表不在页面脚本中。
+	// 以下映射由站点现有图片逐字核对得到。
+	mobile17CharacterImages = map[string]string{
+		"a1": "爱",
+		"b1": "爆",
+		"b2": "暴",
+		"b3": "屄",
+		"b4": "棒",
+		"b5": "逼",
+		"b6": "巴",
+		"c1": "草",
+		"c2": "操",
+		"c3": "插",
+		"c4": "肏",
+		"c5": "潮",
+		"d1": "荡",
+		"d2": "屌",
+		"d3": "洞",
+		"f1": "妇",
+		"f2": "粉",
+		"g1": "肛",
+		"g2": "龟",
+		"g3": "干",
+		"g4": "股",
+		"j1": "精",
+		"j2": "奸",
+		"j3": "交",
+		"j4": "鸡",
+		"j5": "妓",
+		"k1": "口",
+		"l1": "轮",
+		"l2": "浪",
+		"l3": "乱",
+		"l4": "裸",
+		"n1": "奶",
+		"n2": "女",
+		"n3": "嫩",
+		"n4": "奴",
+		"p1": "喷",
+		"p2": "破",
+		"p3": "屁",
+		"q1": "情",
+		"r1": "肉",
+		"r2": "乳",
+		"r3": "人",
+		"r4": "入",
+		"r5": "日",
+		"s1": "射",
+		"s2": "深",
+		"t1": "头",
+		"t2": "臀",
+		"x1": "穴",
+		"x2": "性",
+		"y1": "液",
+		"y2": "淫",
+		"y3": "阴",
+	}
 )
 
 // mobile17Site 适配使用 17mb 手机模板的移动小说站：
@@ -370,7 +428,7 @@ func mobileChapterParagraphs(doc *html.Node) []string {
 	if container == nil {
 		return nil
 	}
-	raw := nodeTextPreserveLineBreaks(container)
+	raw := mobile17ChapterText(container)
 	lines := make([]string, 0, 64)
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(strings.ReplaceAll(line, "\u00a0", " "))
@@ -382,6 +440,38 @@ func mobileChapterParagraphs(doc *html.Node) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func mobile17ChapterText(node *html.Node) string {
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+		}
+		if n.Type == html.ElementNode {
+			switch n.Data {
+			case "br":
+				b.WriteString("\n")
+			case "img":
+				src := strings.TrimSpace(attrValue(n, "src"))
+				if m := mobileCharImageRe.FindStringSubmatch(src); len(m) == 2 {
+					if char, ok := mobile17CharacterImages[m[1]]; ok {
+						b.WriteString(char)
+					} else {
+						b.WriteString("[字图:")
+						b.WriteString(m[1])
+						b.WriteString("]")
+					}
+				}
+			}
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return b.String()
 }
 
 func mobileNextPageURL(doc *html.Node) string {
