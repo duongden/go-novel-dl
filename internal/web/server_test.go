@@ -370,6 +370,90 @@ func TestTimeoutNoticeUsesDedicatedFloatingState(t *testing.T) {
 	}
 }
 
+func TestTemporaryWarningsUseCompactFloatingStatusLayout(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`function createTemporaryWarningItem(warning)`,
+		`function temporaryWarningTitle(warnings)`,
+		`return "渠道响应超时"`,
+		`return "渠道需要登录"`,
+		`dialog.classList.toggle("is-auth", allAuth)`,
+		`const TEMPORARY_WARNING_AUTO_HIDE_MS = 8000`,
+		`function pauseTemporaryWarningAutoHide()`,
+		`text = text.replace(/^临时提示[：:]\s*/, "")`,
+		`return "需要登录或配置 Cookie 后重试。"`,
+		`message.className = "temporary-warning-item-message"`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected compact temporary warning script %s", needle)
+		}
+	}
+	if strings.Contains(script, `nth-child(n+2)`) {
+		t.Fatal("temporary warnings must not hide all but the first item")
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`width: min(390px, calc(100vw - 40px))`,
+		`max-height: min(48vh, 360px)`,
+		`grid-template-rows: auto minmax(0, 1fr)`,
+		`.temporary-warning-dialog.is-auth .temporary-warning-head h2::before`,
+		`.temporary-warning-item.is-auth .temporary-warning-item-badge`,
+		`.temporary-warning-item-action:hover`,
+		`overscroll-behavior: contain`,
+		`max-height: min(46vh, 320px)`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected compact temporary warning style %s", needle)
+		}
+	}
+}
+
+func TestSearchWarningsUseCompactExpandableSummary(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`function createWarningSummary(warnings)`,
+		`details.className = "warning-summary"`,
+		`function warningReason(warning)`,
+		`return "域名暂时无法解析"`,
+		`return "需要登录或配置 Cookie"`,
+		`setStatus("正在加载完整目录…")`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected compact warning script %s", needle)
+		}
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`.warning-summary {`,
+		`.warning-summary-head {`,
+		`.warning-summary-list {`,
+		`.warning-summary[open] .warning-summary-toggle::after`,
+		`.status-card[data-tone="warning"]`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected compact warning style %s", needle)
+		}
+	}
+}
+
 func TestReaderControlsAreCenterTapAndAutoHide(t *testing.T) {
 	data, err := templateFS.ReadFile("templates/app.js")
 	if err != nil {
@@ -434,7 +518,7 @@ func TestMobileSearchResultStylesPreventLongTextOverflow(t *testing.T) {
 		`@media (max-width: 480px)`,
 		`grid-template-columns: 72px minmax(0, 1fr)`,
 		`.result-cover-overlay { display: none; }`,
-		`max-height: min(42vh, 260px)`,
+		`max-height: min(46vh, 320px)`,
 	} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected mobile overflow guard style %s", needle)

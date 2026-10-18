@@ -14,6 +14,7 @@ let siteStats = window.__NOVEL_DL__.siteStats || [];
 const siteWarningPanel = document.getElementById("siteWarningPanel");
 let siteWarningHideTimer = 0;
 let temporaryWarningDialogTimer = 0;
+const TEMPORARY_WARNING_AUTO_HIDE_MS = 8000;
 const VERSION_AUTO_CHECK_KEY = "novel-dl:update_checked_at";
 const VERSION_AUTO_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
 
@@ -246,19 +247,109 @@ function showTemporaryWarningDialog(warnings) {
   const dialog = ensureTemporaryWarningDialog();
   const list = dialog.querySelector(".temporary-warning-list");
   const title = dialog.querySelector("#temporaryWarningHeading");
-  const normalized = items.map((warning) => (
-    typeof warning === "string" ? { message: warning, level: "info" } : warning
-  ));
+  const summary = dialog.querySelector("#temporaryWarningSummary");
+  const normalized = items.map((warning) => {
+    const item = typeof warning === "string" ? { message: warning, level: "info" } : warning;
+    return { ...item, kind: item.kind || warningKind(item) };
+  });
   const hasTimeout = normalized.some((warning) => warning.kind === "timeout");
+  const allAuth = normalized.every((warning) => warning.kind === "auth");
+  const allBlocked = normalized.every((warning) => warning.kind === "blocked");
   dialog.classList.toggle("has-timeout", hasTimeout);
-  if (title) title.textContent = hasTimeout ? "渠道响应超时" : "临时提示";
+  dialog.classList.toggle("is-auth", allAuth);
+  dialog.classList.toggle("is-blocked", allBlocked);
+  if (title) title.textContent = temporaryWarningTitle(normalized);
+  if (summary) summary.textContent = `${normalized.length} 个渠道本次已跳过 · 不影响其他渠道结果`;
   list.innerHTML = "";
   normalized.forEach((warning) => {
-    list.appendChild(createSiteWarningCard(warning));
+    list.appendChild(createTemporaryWarningItem(warning));
   });
   dialog.hidden = false;
+  scheduleTemporaryWarningAutoHide();
+}
+
+function temporaryWarningTitle(warnings) {
+  if (warnings.every((warning) => warning.kind === "timeout")) return "渠道响应超时";
+  if (warnings.every((warning) => warning.kind === "auth")) return "渠道需要登录";
+  if (warnings.every((warning) => warning.kind === "blocked")) return "渠道访问受限";
+  if (warnings.some((warning) => ["timeout", "blocked", "auth"].includes(warning.kind))) return "部分渠道响应异常";
+  return "临时提示";
+}
+
+function scheduleTemporaryWarningAutoHide() {
   if (temporaryWarningDialogTimer) window.clearTimeout(temporaryWarningDialogTimer);
-  temporaryWarningDialogTimer = window.setTimeout(hideTemporaryWarningDialog, 5000);
+  temporaryWarningDialogTimer = window.setTimeout(hideTemporaryWarningDialog, TEMPORARY_WARNING_AUTO_HIDE_MS);
+}
+
+function pauseTemporaryWarningAutoHide() {
+  if (!temporaryWarningDialogTimer) return;
+  window.clearTimeout(temporaryWarningDialogTimer);
+  temporaryWarningDialogTimer = 0;
+}
+
+function resumeTemporaryWarningAutoHide() {
+  const dialog = document.getElementById("temporaryWarningDialog");
+  if (!dialog || dialog.hidden || dialog.matches(":hover") || dialog.contains(document.activeElement)) return;
+  scheduleTemporaryWarningAutoHide();
+}
+
+function createTemporaryWarningItem(warning) {
+  const kind = warning.kind || "info";
+  const card = document.createElement("article");
+  card.className = `temporary-warning-item is-${kind}`;
+
+  const head = document.createElement("div");
+  head.className = "temporary-warning-item-head";
+  const site = document.createElement("span");
+  site.className = "temporary-warning-item-site";
+  site.textContent = warning.site_key ? sourceLabel(warning.site_key) : "渠道提示";
+  const badge = document.createElement("span");
+  badge.className = "temporary-warning-item-badge";
+  badge.textContent = kind === "timeout" ? "响应超时" : kind === "blocked" ? "访问受限" : kind === "auth" ? "需要登录" : "临时跳过";
+  head.append(site, badge);
+
+  const message = document.createElement("p");
+  message.className = "temporary-warning-item-message";
+  message.textContent = temporaryWarningMessage(warning);
+  card.append(head, message);
+
+  if (warning.action_label && warning.action_link) {
+    const action = document.createElement("a");
+    action.className = "temporary-warning-item-action";
+    action.href = warning.action_link;
+    if (warning.action_link === "#site-config") {
+      action.addEventListener("click", (event) => {
+        event.preventDefault();
+        hideTemporaryWarningDialog();
+        void openSiteConfig();
+        if (siteConfigKeyNode) {
+          siteConfigKeyNode.value = warning.site_key || "esjzone";
+          populateSiteConfigForm(siteConfigKeyNode.value);
+        }
+      });
+    } else {
+      action.target = "_blank";
+      action.rel = "noopener noreferrer";
+    }
+    action.textContent = warning.action_label;
+    card.appendChild(action);
+  }
+  return card;
+}
+
+function temporaryWarningMessage(warning) {
+  const rawText = `${(warning && warning.message) || ""} ${(warning && warning.error) || ""}`.toLowerCase();
+  if (warning && warning.kind === "auth") return "需要登录或配置 Cookie 后重试。";
+  if (warning && warning.kind === "timeout") return "站点在限定时间内未响应，请稍后重试。";
+  if (warning && warning.kind === "blocked") return "站点触发了访问限制，请稍后重试。";
+  if (rawText.includes("getaddrinfow") || rawText.includes("no such host")) return "域名暂时无法解析。";
+  let text = String((warning && warning.message) || "").trim();
+  text = text.replace(/^临时提示[：:]\s*/, "");
+  const site = warning && warning.site_key ? sourceLabel(warning.site_key) : "";
+  if (site && text.startsWith(`${site}：`)) text = text.slice(site.length + 1).trim();
+  else if (site && text.startsWith(`${site} `)) text = text.slice(site.length).trim();
+  text = text.replace(/^临时提示[：:]\s*/, "");
+  return text || "本次请求暂时未能完成。";
 }
 
 function hideTemporaryWarningDialog() {
@@ -287,22 +378,34 @@ function ensureTemporaryWarningDialog() {
 
   const head = document.createElement("div");
   head.className = "temporary-warning-head";
+  const titleBlock = document.createElement("div");
+  titleBlock.className = "temporary-warning-title-block";
   const title = document.createElement("h2");
   title.id = "temporaryWarningHeading";
   title.textContent = "临时提示";
+  const summary = document.createElement("p");
+  summary.id = "temporaryWarningSummary";
+  summary.className = "temporary-warning-summary";
+  titleBlock.append(title, summary);
   const close = document.createElement("button");
   close.type = "button";
   close.className = "temporary-warning-close";
   close.setAttribute("aria-label", "关闭临时提示");
   close.textContent = "×";
   close.addEventListener("click", hideTemporaryWarningDialog);
-  head.append(title, close);
+  head.append(titleBlock, close);
 
   const list = document.createElement("div");
   list.className = "temporary-warning-list";
 
   modal.append(head, list);
   dialog.appendChild(modal);
+  dialog.addEventListener("pointerenter", pauseTemporaryWarningAutoHide);
+  dialog.addEventListener("pointerleave", resumeTemporaryWarningAutoHide);
+  dialog.addEventListener("focusin", pauseTemporaryWarningAutoHide);
+  dialog.addEventListener("focusout", (event) => {
+    if (!dialog.contains(event.relatedTarget)) resumeTemporaryWarningAutoHide();
+  });
   document.body.appendChild(dialog);
   return dialog;
 }
@@ -1239,6 +1342,7 @@ function refreshSourceFiltersToggleSummary() {
 function renderWarnings(warnings) {
   warningsNode.innerHTML = "";
   const temporaryWarnings = [];
+  const visibleWarnings = [];
   warnings.forEach((warning) => {
     const message = formatSearchWarning(warning);
     if (isTemporaryWarningText(message)) {
@@ -1251,13 +1355,88 @@ function renderWarnings(warnings) {
       });
       return;
     }
-    const node = document.createElement("div");
-    node.className = "warning-item";
-    node.textContent = message;
-    warningsNode.appendChild(node);
+    visibleWarnings.push(warning);
   });
+  if (visibleWarnings.length) warningsNode.appendChild(createWarningSummary(visibleWarnings));
   warningsNode.classList.toggle("is-empty", warningsNode.children.length === 0);
   if (temporaryWarnings.length) showTemporaryWarningDialog(temporaryWarnings);
+}
+
+function createWarningSummary(warnings) {
+  const details = document.createElement("details");
+  details.className = "warning-summary";
+
+  const summary = document.createElement("summary");
+  summary.className = "warning-summary-head";
+
+  const icon = document.createElement("span");
+  icon.className = "warning-summary-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = "!";
+
+  const copy = document.createElement("span");
+  copy.className = "warning-summary-copy";
+  const title = document.createElement("span");
+  title.className = "warning-summary-title";
+  const meta = document.createElement("span");
+  meta.className = "warning-summary-meta";
+  const labels = warnings.map((warning) => sourceLabel(warning.site));
+  if (warnings.length === 1) {
+    title.textContent = `${labels[0]}暂时不可用`;
+    meta.textContent = `${warningReason(warnings[0])} · 其他渠道结果不受影响`;
+  } else {
+    title.textContent = `${warnings.length} 个渠道暂时不可用`;
+    const shown = labels.slice(0, 3).join("、");
+    meta.textContent = `${shown}${labels.length > 3 ? " 等" : ""} · 其他渠道结果不受影响`;
+  }
+  copy.append(title, meta);
+
+  const toggle = document.createElement("span");
+  toggle.className = "warning-summary-toggle";
+  toggle.textContent = "详情";
+  summary.append(icon, copy, toggle);
+
+  const list = document.createElement("div");
+  list.className = "warning-summary-list";
+  warnings.forEach((warning) => {
+    const row = document.createElement("div");
+    row.className = "warning-summary-row";
+    if (warning.error) row.title = String(warning.error);
+    const site = document.createElement("span");
+    site.className = "warning-summary-site";
+    site.textContent = sourceLabel(warning.site);
+    const reason = document.createElement("span");
+    reason.className = "warning-summary-reason";
+    reason.textContent = warningReason(warning);
+    row.append(site, reason);
+    list.appendChild(row);
+  });
+
+  details.append(summary, list);
+  return details;
+}
+
+function warningReason(warning) {
+  const error = String((warning && warning.error) || "").trim();
+  const lower = error.toLowerCase();
+  if (lower.includes("http 401") || error.includes("未登录") || lower.includes("unauthorized")) {
+    return "需要登录或配置 Cookie";
+  }
+  if (lower.includes("getaddrinfow") || lower.includes("no such host") || (lower.includes("lookup ") && lower.includes("dial tcp"))) {
+    return "域名暂时无法解析";
+  }
+  if (lower.includes("context deadline exceeded") || lower.includes("timeout")) {
+    return "响应超时";
+  }
+  if (lower.includes("http 403")) {
+    return "访问受限";
+  }
+  if (lower.includes("connection refused") || lower.includes("connectex") || lower.includes("dial tcp")) {
+    return "网络连接失败";
+  }
+  const status = error.match(/\bHTTP\s+(\d{3})\b/i);
+  if (status) return `服务返回 HTTP ${status[1]}`;
+  return "暂时无法完成搜索";
 }
 
 function isTemporaryWarningText(text) {
@@ -1270,9 +1449,9 @@ function formatSearchWarning(warning) {
   const lower = error.toLowerCase();
   let reason = error;
   if (lower.includes("context deadline exceeded") || lower.includes("timeout")) {
-    reason = "临时提示：站点响应超时，已跳过该渠道，不影响其它渠道结果。";
+    reason = "临时提示：站点响应超时。";
   } else if (lower.includes("http 403")) {
-    reason = "临时提示：站点返回 403，可能触发访问限制/反爬，已跳过该渠道。";
+    reason = "临时提示：站点返回 403，可能触发访问限制或反爬验证。";
   }
   if (warning.site === "n8novel" && !reason.includes("无限轻小说")) {
     reason += " 无限轻小说近期较容易出现 403，可稍后重试。";
@@ -1281,9 +1460,10 @@ function formatSearchWarning(warning) {
 }
 
 function warningKind(warning) {
-  const lower = String((warning && warning.error) || "").toLowerCase();
-  if (lower.includes("context deadline exceeded") || lower.includes("timeout")) return "timeout";
-  if (lower.includes("http 403")) return "blocked";
+  const text = `${(warning && warning.error) || ""} ${(warning && warning.message) || ""}`.toLowerCase();
+  if (text.includes("http 401") || text.includes(" 401") || text.includes("unauthorized") || text.includes("未登录")) return "auth";
+  if (text.includes("context deadline exceeded") || text.includes("timeout") || text.includes("超时")) return "timeout";
+  if (text.includes("http 403") || text.includes(" 403") || text.includes("访问限制") || text.includes("反爬")) return "blocked";
   return "info";
 }
 
@@ -1714,12 +1894,12 @@ async function openReaderFromDetail(result, variant, clickedChapter, chapterInde
 
   try {
     const expectedTotal = Number(chapterPage && chapterPage.total) || fallbackChapters.length;
-    if (expectedTotal > fallbackChapters.length) setStatus("正在加载完整章节目录，用于阅读器显示全书章节...");
+    if (expectedTotal > fallbackChapters.length) setStatus("正在加载完整目录…");
     const chapters = await loadReaderCatalog(activeVariant, chapterPage, fallbackChapters);
     const readerIndex = resolveReaderChapterIndex(chapters, clickedChapter, chapterIndex);
     openReader(chapters, readerIndex);
   } catch (error) {
-    setStatus(`完整章节目录加载失败：${error.message}，先打开当前分页。`, "warning");
+    setStatus("完整目录加载失败，已先打开当前分页。", "warning");
     if (fallbackChapters.length) openReader(fallbackChapters, localIndex);
   }
 }
