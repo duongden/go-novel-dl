@@ -596,7 +596,7 @@ func TestReaderUsesPaginatedHorizontalChapterTransitions(t *testing.T) {
 		`function setReaderPagePosition`,
 		`function turnReaderPage`,
 		`async function transitionReaderChapter`,
-		`showReaderTransition(step, targetIndex, targetCached)`,
+		`showReaderTransition(step, targetIndex, targetCached, { viaCatalog })`,
 		`function prefetchReaderAdjacentChapters`,
 		`function isReaderChapterCached`,
 		`function rememberReaderChapterContent`,
@@ -688,6 +688,28 @@ func TestReaderChapterTransitionsRetryAndPreservePositionOnFailure(t *testing.T)
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected retryable reader chapter transition to contain %s", needle)
 		}
+	}
+}
+
+func TestReaderCatalogJumpUsesChapterTransition(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`async function transitionReaderChapter(direction, options = {})`,
+		`const requestedTarget = Number(options.targetIndex)`,
+		`transitionReaderChapter(direction, { targetIndex: next, viaCatalog: true })`,
+		`showReaderTransition(step, targetIndex, targetCached, { viaCatalog })`,
+		`章节跳转失败`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected catalog chapter jump to contain %s", needle)
+		}
+	}
+	if strings.Contains(script, `openReader(readerState.chapters, next)`) {
+		t.Fatal("expected catalog jump to reuse the chapter transition instead of reopening the reader")
 	}
 }
 

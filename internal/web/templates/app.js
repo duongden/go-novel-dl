@@ -2484,15 +2484,23 @@ function jumpReaderToChapter(index) {
   const next = Math.min(Math.max(0, index), readerState.chapters.length - 1);
   hideReaderCatalog();
   if (next === readerState.currentIndex) return;
-  openReader(readerState.chapters, next);
+  const direction = next > readerState.currentIndex ? 1 : -1;
+  void transitionReaderChapter(direction, { targetIndex: next, viaCatalog: true });
 }
 
-async function transitionReaderChapter(direction) {
-  const step = Number(direction) < 0 ? -1 : 1;
-  const targetIndex = readerState.currentIndex + step;
+async function transitionReaderChapter(direction, options = {}) {
+  const requestedTarget = Number(options.targetIndex);
+  const targetIndex = Number.isFinite(requestedTarget)
+    ? Math.floor(requestedTarget)
+    : readerState.currentIndex + (Number(direction) < 0 ? -1 : 1);
+  const step = targetIndex === readerState.currentIndex
+    ? 0
+    : (targetIndex > readerState.currentIndex ? 1 : -1);
+  const viaCatalog = Boolean(options.viaCatalog);
   if (
     readerState.transitioning
     || readerOverlay.hidden
+    || step === 0
     || targetIndex < 0
     || targetIndex >= readerState.chapters.length
   ) return;
@@ -2512,7 +2520,7 @@ async function transitionReaderChapter(direction) {
 
   updateReaderTitle(targetIndex);
   setReaderScrollLocked(true);
-  showReaderTransition(step, targetIndex, targetCached);
+  showReaderTransition(step, targetIndex, targetCached, { viaCatalog });
   readerPageViewport.classList.add(leavingClass);
   const startedAt = performance.now();
 
@@ -2534,8 +2542,10 @@ async function transitionReaderChapter(direction) {
       updateReaderTitle(previousIndex);
       setReaderPagePosition(previousPage, { animate: false });
       showToast(
-        step > 0 ? "下一章加载失败" : "上一章加载失败",
-        "章节请求暂时失败，已保留当前阅读位置，请再次翻页重试。",
+        viaCatalog ? "章节跳转失败" : (step > 0 ? "下一章加载失败" : "上一章加载失败"),
+        viaCatalog
+          ? "章节请求暂时失败，已保留当前阅读位置，请再次选择章节。"
+          : "章节请求暂时失败，已保留当前阅读位置，请再次翻页重试。",
         "warning",
         { durationMs: 5200 },
       );
@@ -2572,10 +2582,14 @@ async function transitionReaderChapter(direction) {
   }
 }
 
-function showReaderTransition(direction, targetIndex, cached = false) {
+function showReaderTransition(direction, targetIndex, cached = false, options = {}) {
   if (!readerTransitionLayer) return;
   const target = readerState.chapters[targetIndex];
-  if (readerTransitionKicker) readerTransitionKicker.textContent = direction > 0 ? "下一章" : "上一章";
+  if (readerTransitionKicker) {
+    readerTransitionKicker.textContent = options.viaCatalog
+      ? "跳转章节"
+      : (direction > 0 ? "下一章" : "上一章");
+  }
   if (readerTransitionPosition) readerTransitionPosition.textContent = `${targetIndex + 1} / ${readerState.chapters.length}`;
   if (readerTransitionTitle) readerTransitionTitle.textContent = (target && target.title) || `第 ${targetIndex + 1} 章`;
   if (readerTransitionStatus) {
