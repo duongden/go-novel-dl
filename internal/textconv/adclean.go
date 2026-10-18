@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 	"golang.org/x/text/width"
@@ -11,6 +12,7 @@ import (
 
 var adDomainSuffixRe = regexp.MustCompile(`(?i)\.(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co|site|online|club|link|app|live)(?:[/:]|$)`)
 var adBareDomainSuffixRe = regexp.MustCompile(`(?i)(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co)(?:[/:]|$)`)
+var adObfuscatedEmailRe = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._%+\-]*@[a-z0-9][a-z0-9.\-]*\.(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co|site|online|club|link|app|live)`)
 
 var adMarkers = []string{
 	"地址发布", "地址發布", "发布地址", "發布地址", "发布页", "發布頁",
@@ -26,11 +28,21 @@ var adMarkers = []string{
 
 var adURLPrefixes = []string{"http://", "https://", "www."}
 var adTrailingSlogans = []string{"更多精彩", "更多彩"}
+var adEmailLeads = []string{
+	"地址发布邮箱", "地址發布郵箱", "联系邮箱", "聯繫郵箱",
+	"发布邮箱", "發布郵箱", "电子邮箱", "電子郵箱",
+	"发邮件到", "發郵件到", "邮件", "郵件", "邮箱", "郵箱",
+}
 
 type compactAdText struct {
 	value      string
 	offsets    []int
 	obfuscated bool
+}
+
+type adTextRange struct {
+	start int
+	end   int
 }
 
 // CleanAdContent removes standalone site advertisements and obfuscated URL
@@ -70,6 +82,12 @@ func CleanAdContent(content string) string {
 // advertisement marker is kept while the advertisement suffix is discarded.
 func CleanAdLine(line string) string {
 	scan := compactAdLine(line)
+	line = removeAdEmailSpans(line, scan)
+	if strings.TrimSpace(line) == "" {
+		return ""
+	}
+
+	scan = compactAdLine(line)
 	start := adMarkerOffset(scan)
 	if urlStart := adURLStart(scan); urlStart >= 0 && (start < 0 || urlStart < start) {
 		start = urlStart
@@ -199,7 +217,84 @@ func isIgnoredAdRune(value rune) bool {
 	if unicode.IsSpace(value) || unicode.Is(unicode.Cf, value) || unicode.Is(unicode.Mn, value) {
 		return true
 	}
-	return strings.ContainsRune("?？·•‧∙…`´‘’ʹ゛゜\\｜", value)
+	return strings.ContainsRune("?？、·•‧∙…`´‘’ʹ゛゜\\｜", value)
+}
+
+func removeAdEmailSpans(line string, scan compactAdText) string {
+	ranges := adEmailRanges(line, scan)
+	if len(ranges) == 0 {
+		return line
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(line))
+	cursor := 0
+	trimTail := false
+	for _, current := range ranges {
+		if current.start < cursor || current.start < 0 || current.end > len(line) || current.end <= current.start {
+			continue
+		}
+		builder.WriteString(line[cursor:current.start])
+		cursor = current.end
+		trimTail = current.end == len(line)
+	}
+	builder.WriteString(line[cursor:])
+	result := builder.String()
+	if trimTail {
+		result = strings.TrimRightFunc(result, isDanglingAdRune)
+	}
+	return result
+}
+
+func adEmailRanges(line string, scan compactAdText) []adTextRange {
+	if scan.value == "" {
+		return nil
+	}
+
+	matches := adObfuscatedEmailRe.FindAllStringIndex(scan.value, -1)
+	ranges := make([]adTextRange, 0, len(matches))
+	for _, match := range matches {
+		if match[0] >= len(scan.offsets) || match[1] <= 0 || match[1]-1 >= len(scan.offsets) {
+			continue
+		}
+		start := scan.offsets[match[0]]
+		leadStart := adEmailLeadStart(scan, match[0])
+		if leadStart >= 0 {
+			start = leadStart
+		}
+		end := nextRuneOffset(line, scan.offsets[match[1]-1])
+		leading := len(line) - len(strings.TrimLeftFunc(line, unicode.IsSpace))
+		if leadStart >= 0 || start == leading {
+			end = len(line)
+		}
+		ranges = append(ranges, adTextRange{start: start, end: end})
+	}
+	return ranges
+}
+
+func nextRuneOffset(line string, start int) int {
+	if start < 0 || start >= len(line) {
+		return len(line)
+	}
+	_, size := utf8.DecodeRuneInString(line[start:])
+	return start + size
+}
+
+func adEmailLeadStart(scan compactAdText, emailStart int) int {
+	prefix := scan.value[:emailStart]
+	start := -1
+	for _, lead := range adEmailLeads {
+		compactLead := compactAdLine(lead).value
+		if compactLead == "" || !strings.HasSuffix(prefix, compactLead) {
+			continue
+		}
+		index := len(prefix) - len(compactLead)
+		candidate := scan.offsets[index]
+		if start < 0 || candidate < start {
+			start = candidate
+		}
+	}
+	return start
 }
 
 func adMarkerOffset(scan compactAdText) int {

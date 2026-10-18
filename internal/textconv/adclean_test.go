@@ -69,6 +69,26 @@ func TestCleanAdLineRemovesObfuscatedURLs(t *testing.T) {
 			want: "两个表情严肃的人枯坐在咖啡厅靠窗户处，",
 		},
 		{
+			name: "obfuscated email inserted in the middle of prose",
+			line: "顾婉清吃完饭就坐到了客厅沙发上。lтｘＳb a @ ｇＭAil.c〇ｍ本子摊开，笔握在手里，坐得笔直。",
+			want: "顾婉清吃完饭就坐到了客厅沙发上。本子摊开，笔握在手里，坐得笔直。",
+		},
+		{
+			name: "published mailbox with inserted separator",
+			line: "周六晚上，顾婉清又做了四个菜。地址发、布邮箱 Līx_SBǎ@ＧＭＡＩＬ．ｃＯＭ",
+			want: "周六晚上，顾婉清又做了四个菜。",
+		},
+		{
+			name: "obfuscated email suffix embedded after prose",
+			line: "“我这辈子，二十二岁相亲，三面定婚期，然后结婚，生你，上班，下班，值夜班，上手术台。郵件LīxsBǎ@gｍail.ｃｏm?.ｃom发布(地址发布邮箱：ltxsba@gmail.com 发送任意邮件即可！",
+			want: "“我这辈子，二十二岁相亲，三面定婚期，然后结婚，生你，上班，下班，值夜班，上手术台。",
+		},
+		{
+			name: "obfuscated email fragment at the start of a page",
+			line: "ǎ@ＧＭＡＩＬ．￠ＯＭ╒寻╜回?",
+			want: "",
+		},
+		{
 			name: "ordinary prose is preserved",
 			line: "天亮了。他说：“你好。”",
 			want: "天亮了。他说：“你好。”",

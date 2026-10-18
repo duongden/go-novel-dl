@@ -2370,7 +2370,7 @@ function ensureReaderPageViewport() {
 readerPageViewport = ensureReaderPageViewport();
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
-const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v5";
+const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v6";
 const READER_CONTENT_CACHE_LIMIT = 32;
 const READER_CONTENT_CACHE_MAX_CHARS = 2000000;
 const READER_PAGE_SWIPE_THRESHOLD = 52;

@@ -177,6 +177,10 @@ func TestMobile17ChapterContentCleansObfuscatedAds(t *testing.T) {
 1.哥哥，我喜欢你啊。发布页Ltxsdz…℃〇M更多彩<br><br>
 走出酒吧正门，音乐声消失在脑后。『发布邮箱 Ltxs??A @ GmaiL.co??』<br><br>
 程晓羽的心里才平复一点。<dfn>Ltxsｄz.€ǒm.com</dfn><br><br>
+顾婉清吃完饭就坐到了客厅沙发上。lтｘＳb a @ ｇＭAil.c〇ｍ本子摊开，笔握在手里，坐得笔直。<br><br>
+周六晚上，顾婉清又做了四个菜。地址发、布邮箱 Līx_SBǎ@ＧＭＡＩＬ．ｃＯＭ<br><br>
+“我这辈子，二十二岁相亲，三面定婚期，然后结婚，生你，上班，下班，值夜班，上手术台。郵件LīxsBǎ@gｍail.ｃｏm?.ｃom发布(地址发布邮箱：ltxsba@gmail.com 发送任意邮件即可！<br><br>
+ǎ@ＧＭＡＩＬ．￠ＯＭ╒寻╜回?<br><br>
 <div id="center_tip"><b>地址发布邮箱：ltxsba@gmail.com 发送任意邮件即可！</b></div>
 <font color="red">本章未完，请点击下一页继续阅读》》</font><br><br>
 正常结尾。
@@ -186,7 +190,7 @@ func TestMobile17ChapterContentCleansObfuscatedAds(t *testing.T) {
 	}
 
 	got := strings.Join(mobileChapterParagraphs(doc), "\n")
-	want := "凌晨两点，程晓羽还在做与音乐相关的工作。\n程晓羽再次恢复意识，已经不知道时间过去多久。\n大飞在电视台做音乐总监。\n1.哥哥，我喜欢你啊。\n走出酒吧正门，音乐声消失在脑后。\n程晓羽的心里才平复一点。\n正常结尾。"
+	want := "凌晨两点，程晓羽还在做与音乐相关的工作。\n程晓羽再次恢复意识，已经不知道时间过去多久。\n大飞在电视台做音乐总监。\n1.哥哥，我喜欢你啊。\n走出酒吧正门，音乐声消失在脑后。\n程晓羽的心里才平复一点。\n顾婉清吃完饭就坐到了客厅沙发上。本子摊开，笔握在手里，坐得笔直。\n周六晚上，顾婉清又做了四个菜。\n“我这辈子，二十二岁相亲，三面定婚期，然后结婚，生你，上班，下班，值夜班，上手术台。\n正常结尾。"
 	if got != want {
 		t.Fatalf("unexpected cleaned content:\n got: %q\nwant: %q", got, want)
 	}
