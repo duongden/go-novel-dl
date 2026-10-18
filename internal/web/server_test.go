@@ -204,7 +204,7 @@ func TestIndexPageGlobalSettingsKeepOnlyUsefulRuntimeKnobs(t *testing.T) {
 			t.Fatalf("expected index page to hide low-value runtime knob %s", needle)
 		}
 	}
-	for _, needle := range []string{`id="saveSettingsConfig"`, `id="settingsSaveStatus"`, `class="site-config-close-button"`} {
+	for _, needle := range []string{`id="saveSettingsConfig"`, `id="settingsSaveStatus"`, `class="settings-close-button"`} {
 		if !strings.Contains(body, needle) {
 			t.Fatalf("expected settings center to contain %s, body=%s", needle, body)
 		}
@@ -293,13 +293,44 @@ func TestVersionUpdateReminderAssets(t *testing.T) {
 	}
 }
 
-func TestSettingsSavePromptAndStickyCloseStyles(t *testing.T) {
+func TestSettingsCenterUsesSectionedNavigation(t *testing.T) {
+	data, err := templateFS.ReadFile("templates/index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	markup := string(data)
+	for _, needle := range []string{
+		`class="settings-modal-header"`,
+		`class="settings-modal-body"`,
+		`class="settings-modal-footer"`,
+		`data-settings-tab="performance"`,
+		`data-settings-tab="content"`,
+		`data-settings-tab="storage"`,
+		`data-settings-tab="site"`,
+		`id="settingsPanelPerformance"`,
+		`id="settingsPanelContent"`,
+		`id="settingsPanelStorage"`,
+		`id="settingsPanelSite"`,
+	} {
+		if !strings.Contains(markup, needle) {
+			t.Fatalf("expected sectioned settings markup %s", needle)
+		}
+	}
+
 	scriptData, err := templateFS.ReadFile("templates/app.js")
 	if err != nil {
 		t.Fatalf("read app.js: %v", err)
 	}
 	script := string(scriptData)
-	for _, needle := range []string{`setSettingsSaveStatus("正在保存系统设置..."`, `系统设置已保存`, `saveSettingsConfig`} {
+	for _, needle := range []string{
+		`setSettingsSaveStatus("正在保存系统设置..."`,
+		`系统设置已保存`,
+		`saveSettingsConfig`,
+		`function setupSettingsNavigation()`,
+		`function activateSettingsPanel(panelKey, options = {})`,
+		`openSiteConfig({ panel: "site", siteKey: warning.site_key || "esjzone" })`,
+		`siteConfigStatusNode.dataset.tone = configured ? "configured" : "empty"`,
+	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected settings script to contain %s", needle)
 		}
@@ -310,7 +341,17 @@ func TestSettingsSavePromptAndStickyCloseStyles(t *testing.T) {
 		t.Fatalf("read style.css: %v", err)
 	}
 	style := string(styleData)
-	for _, needle := range []string{`.site-config-close-button`, `position: sticky`, `right: 0`, `.settings-save-status`} {
+	for _, needle := range []string{
+		`.site-config-modal {`,
+		`grid-template-rows: auto auto minmax(0, 1fr) auto`,
+		`.settings-modal-header {`,
+		`.settings-modal-footer {`,
+		`.settings-navigation {`,
+		`.settings-nav-item.is-active`,
+		`.settings-pane[hidden] { display: none; }`,
+		`.settings-toggle input:checked + .settings-switch`,
+		`.settings-save-status`,
+	} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected settings styles to contain %s", needle)
 		}

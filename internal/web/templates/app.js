@@ -225,11 +225,7 @@ function createSiteWarningCard(warning) {
       action.addEventListener("click", (event) => {
         event.preventDefault();
         hideTemporaryWarningDialog();
-        void openSiteConfig();
-        if (siteConfigKeyNode) {
-          siteConfigKeyNode.value = warning.site_key || "esjzone";
-          populateSiteConfigForm(siteConfigKeyNode.value);
-        }
+        void openSiteConfig({ panel: "site", siteKey: warning.site_key || "esjzone" });
       });
     } else {
       action.target = "_blank";
@@ -321,11 +317,7 @@ function createTemporaryWarningItem(warning) {
       action.addEventListener("click", (event) => {
         event.preventDefault();
         hideTemporaryWarningDialog();
-        void openSiteConfig();
-        if (siteConfigKeyNode) {
-          siteConfigKeyNode.value = warning.site_key || "esjzone";
-          populateSiteConfigForm(siteConfigKeyNode.value);
-        }
+        void openSiteConfig({ panel: "site", siteKey: warning.site_key || "esjzone" });
       });
     } else {
       action.target = "_blank";
@@ -579,6 +571,12 @@ const siteMirrorHostsNode = document.getElementById("siteMirrorHosts");
 const generalConfigForm = document.getElementById("generalConfigForm");
 const saveSettingsConfigButton = document.getElementById("saveSettingsConfig");
 const settingsSaveStatusNode = document.getElementById("settingsSaveStatus");
+const settingsTabs = Array.from(document.querySelectorAll("[data-settings-tab]"));
+const settingsPanels = Array.from(document.querySelectorAll("[id^='settingsPanel']"));
+const settingsContentNode = document.querySelector(".settings-content");
+const siteConfigStatusNode = document.getElementById("siteConfigStatus");
+let settingsActivePanel = "performance";
+let settingsPreviousFocus = null;
 
 const generalWorkersNode = document.getElementById("generalWorkers");
 const generalTimeoutNode = document.getElementById("generalTimeout");
@@ -590,7 +588,9 @@ const generalAppendTimestampNode = document.getElementById("generalAppendTimesta
 const generalIncludePictureNode = document.getElementById("generalIncludePicture");
 const generalDisableCacheNode = document.getElementById("generalDisableCache");
 const generalBlurWebImagesNode = document.getElementById("generalBlurWebImages");
-const generalBlurWebImagesLabelNode = generalBlurWebImagesNode ? generalBlurWebImagesNode.nextElementSibling : null;
+const generalBlurWebImagesLabelNode = generalBlurWebImagesNode
+  ? generalBlurWebImagesNode.closest(".settings-toggle")?.querySelector(".settings-toggle-copy strong")
+  : null;
 const generalWebPageSizeNode = document.getElementById("generalWebPageSize");
 const generalCLIPageSizeNode = document.getElementById("generalCLIPageSize");
 const generalRawDataDirNode = document.getElementById("generalRawDataDir");
@@ -696,6 +696,7 @@ function bootstrap() {
   }
 
   setupVersionPanel();
+  setupSettingsNavigation();
   maybeAutoCheckVersion();
 
   clearTagFiltersButton.addEventListener("click", () => {
@@ -3396,6 +3397,7 @@ function renderSiteConfigSelector(items) {
     const option = document.createElement("option");
     option.value = ""; option.textContent = "暂无可配置站点";
     siteConfigKeyNode.appendChild(option);
+    renderSiteConfigStatus(null);
     renderSiteConfigHelp("");
   }
 }
@@ -3417,7 +3419,15 @@ function populateSiteConfigForm(siteKey) {
   
   siteCookieNode.value = item.cookie || "";
   siteMirrorHostsNode.value = Array.isArray(item.mirror_hosts) ? item.mirror_hosts.join("\n") : "";
+  renderSiteConfigStatus(item);
   renderSiteConfigHelp(siteKey);
+}
+
+function renderSiteConfigStatus(item) {
+  if (!siteConfigStatusNode) return;
+  const configured = Boolean(item && (item.cookie || item.username || item.password));
+  siteConfigStatusNode.textContent = configured ? "已配置" : "未配置";
+  siteConfigStatusNode.dataset.tone = configured ? "configured" : "empty";
 }
 
 function renderSiteConfigHelp(siteKey) {
@@ -3441,17 +3451,81 @@ function renderSiteConfigHelp(siteKey) {
   siteCookieHelpNode.textContent = "";
 }
 
-async function openSiteConfig() {
+function setupSettingsNavigation() {
+  if (!settingsTabs.length) return;
+  settingsTabs.forEach((tab) => {
+    tab.addEventListener("click", () => activateSettingsPanel(tab.dataset.settingsTab));
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const currentIndex = settingsTabs.indexOf(tab);
+      let nextIndex = currentIndex;
+      if (event.key === "Home") nextIndex = 0;
+      else if (event.key === "End") nextIndex = settingsTabs.length - 1;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        nextIndex = (currentIndex - 1 + settingsTabs.length) % settingsTabs.length;
+      } else {
+        nextIndex = (currentIndex + 1) % settingsTabs.length;
+      }
+      settingsTabs[nextIndex].focus();
+      activateSettingsPanel(settingsTabs[nextIndex].dataset.settingsTab);
+    });
+  });
+  activateSettingsPanel(settingsActivePanel, { scroll: false });
+}
+
+function activateSettingsPanel(panelKey, options = {}) {
+  const validKeys = settingsTabs.map((tab) => tab.dataset.settingsTab);
+  const nextKey = validKeys.includes(panelKey) ? panelKey : "performance";
+  settingsActivePanel = nextKey;
+  settingsTabs.forEach((tab) => {
+    const active = tab.dataset.settingsTab === nextKey;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  });
+  settingsPanels.forEach((panel) => {
+    panel.hidden = panel.id !== `settingsPanel${nextKey[0].toUpperCase()}${nextKey.slice(1)}`;
+  });
+  if (options.scroll !== false && settingsContentNode) settingsContentNode.scrollTop = 0;
+}
+
+async function openSiteConfig(options = {}) {
+  const panelKey = options.panel || settingsActivePanel;
+  const requestedSiteKey = options.siteKey || "";
+  if (siteConfigOverlay.hidden) {
+    settingsPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  hideTemporaryWarningDialog();
+  activateSettingsPanel(panelKey, { scroll: false });
   siteConfigOverlay.hidden = false;
   document.body.classList.add("has-overlay");
   setSettingsSaveStatus("");
+  window.requestAnimationFrame(() => {
+    const activeTab = settingsTabs.find((tab) => tab.dataset.settingsTab === settingsActivePanel);
+    if (activeTab) {
+      activeTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+      activeTab.focus({ preventScroll: true });
+    }
+  });
   try {
     await Promise.all([loadGeneralConfig(), loadSiteConfigs()]);
+    if (requestedSiteKey && appState.siteConfigs.has(requestedSiteKey)) {
+      siteConfigKeyNode.value = requestedSiteKey;
+      populateSiteConfigForm(requestedSiteKey);
+    }
   } catch (error) {
-    setStatus(`设置刷新失败：${error.message}`);
+    setSettingsSaveStatus(`设置刷新失败：${error.message}`, "error");
   }
 }
-function closeSiteConfig() { siteConfigOverlay.hidden = true; document.body.classList.remove("has-overlay"); }
+
+function closeSiteConfig() {
+  siteConfigOverlay.hidden = true;
+  document.body.classList.remove("has-overlay");
+  const focusTarget = settingsPreviousFocus;
+  settingsPreviousFocus = null;
+  if (focusTarget && focusTarget.isConnected) focusTarget.focus({ preventScroll: true });
+}
 
 function renderGeneralConfigForm(item) {
   if (!item) return;

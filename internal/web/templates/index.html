@@ -210,175 +210,301 @@
 
   <div id="siteConfigOverlay" class="site-config-overlay" hidden>
     <div id="siteConfigBackdrop" class="site-config-backdrop"></div>
-    <section class="site-config-modal" role="dialog" aria-modal="true" aria-labelledby="siteConfigHeading">
-      <button type="button" id="closeSiteConfig" class="site-config-close-button">关闭</button>
-      <div class="site-config-head">
-        <h2 id="siteConfigHeading">设置中心</h2>
-      </div>
+    <section class="site-config-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="siteConfigHeading">
+      <header class="settings-modal-header">
+        <div class="settings-modal-title">
+          <span class="settings-title-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="21" height="21" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </span>
+          <div>
+            <span class="settings-kicker">Novel DL Web</span>
+            <h2 id="siteConfigHeading">设置中心</h2>
+            <p>调整抓取策略、阅读导出和站点登录信息。</p>
+          </div>
+        </div>
+        <button type="button" id="closeSiteConfig" class="settings-close-button" aria-label="关闭设置">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12"></path>
+          </svg>
+          <span>关闭</span>
+        </button>
+      </header>
 
-      <section class="version-bar" aria-label="版本">
-        <div class="version-bar-row">
-          <div class="version-bar-info">
-            <span class="version-label">版本</span>
-            <code id="versionCurrent" class="version-current">-</code>
-            <a id="versionRepoLink" class="version-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <section class="version-bar settings-version-bar" aria-label="版本与更新">
+        <div class="settings-version-identity">
+          <span class="settings-version-mark" aria-hidden="true">v</span>
+          <div>
+            <span class="version-label">应用版本</span>
+            <div class="settings-version-line">
+              <code id="versionCurrent" class="version-current">-</code>
+              <a id="versionRepoLink" class="version-link" target="_blank" rel="noopener noreferrer">GitHub</a>
+            </div>
           </div>
-          <div class="version-bar-controls">
-            <label for="versionMirror" class="version-mirror-label">镜像</label>
-            <select id="versionMirror" class="search-input version-mirror-select"></select>
-            <button type="button" id="versionCheckButton" class="search-button is-compact">检查更新</button>
-          </div>
+        </div>
+        <div class="version-bar-controls settings-version-controls">
+          <label for="versionMirror" class="version-mirror-label">更新镜像</label>
+          <select id="versionMirror" class="search-input version-mirror-select"></select>
+          <button type="button" id="versionCheckButton" class="search-button is-compact">检查更新</button>
         </div>
         <div id="versionResult" class="version-result" hidden></div>
       </section>
 
-      <div class="settings-layout">
-        <section class="config-section-card">
-          <div class="config-section-head">
-            <h3>全局配置</h3>
-            <p class="config-section-desc">这些设置会影响搜索、下载、导出和 Web 阅读。未显示的底层限流参数使用程序默认值。</p>
+      <div class="settings-modal-body">
+        <nav class="settings-navigation" role="tablist" aria-label="设置分类">
+          <button type="button" id="settingsTabPerformance" class="settings-nav-item is-active" data-settings-tab="performance" role="tab" aria-selected="true" aria-controls="settingsPanelPerformance">
+            <span class="settings-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path>
+              </svg>
+            </span>
+            <span class="settings-nav-copy"><strong>性能与网络</strong><small>并发、超时与分页</small></span>
+          </button>
+          <button type="button" id="settingsTabContent" class="settings-nav-item" data-settings-tab="content" role="tab" aria-selected="false" aria-controls="settingsPanelContent" tabindex="-1">
+            <span class="settings-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+              </svg>
+            </span>
+            <span class="settings-nav-copy"><strong>阅读与导出</strong><small>文字、格式与文件命名</small></span>
+          </button>
+          <button type="button" id="settingsTabStorage" class="settings-nav-item" data-settings-tab="storage" role="tab" aria-selected="false" aria-controls="settingsPanelStorage" tabindex="-1">
+            <span class="settings-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              </svg>
+            </span>
+            <span class="settings-nav-copy"><strong>存储与缓存</strong><small>数据目录和缓存策略</small></span>
+          </button>
+          <button type="button" id="settingsTabSite" class="settings-nav-item" data-settings-tab="site" role="tab" aria-selected="false" aria-controls="settingsPanelSite" tabindex="-1">
+            <span class="settings-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+              </svg>
+            </span>
+            <span class="settings-nav-copy"><strong>站点认证</strong><small>登录、Cookie 与镜像</small></span>
+          </button>
+          <div class="settings-nav-note">
+            <span aria-hidden="true">⌘</span>
+            <p>配置保存在本机，不会同步到云端。</p>
           </div>
-          <form id="generalConfigForm" class="site-config-form">
-            <label class="search-field" for="generalWorkers">
-              <span class="field-label">下载并发</span>
-              <div class="range-wrap">
-                <input id="generalWorkers" class="search-input slider" type="range" min="1" max="10" step="1">
-                <span id="generalWorkersVal" class="range-val">4</span>
+        </nav>
+
+        <div class="settings-content">
+          <form id="generalConfigForm" class="settings-form">
+            <section id="settingsPanelPerformance" class="settings-pane" role="tabpanel" aria-labelledby="settingsTabPerformance">
+              <div class="settings-pane-head">
+                <span class="settings-pane-eyebrow">PERFORMANCE</span>
+                <h3>性能与网络</h3>
+                <p>控制抓取速度、等待时间和搜索分页。遇到限流时，优先降低并发并增加请求间隔。</p>
               </div>
-              <span class="field-help">同时下载的章节数。过高更快，但更容易触发站点限制。</span>
-            </label>
-            <label class="search-field" for="generalTimeout">
-              <span class="field-label">请求超时（秒）</span>
-              <div class="range-wrap">
-                <input id="generalTimeout" class="search-input slider" type="range" min="1" max="60" step="1">
-                <span id="generalTimeoutVal" class="range-val">10</span>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>抓取策略</h4><p>参数会同时影响搜索和章节下载。</p></div>
+                  <span class="settings-card-badge">即时生效</span>
+                </div>
+                <div class="settings-field-grid">
+                  <label class="settings-field settings-range-field" for="generalWorkers">
+                    <span class="settings-field-heading"><span><strong>下载并发</strong><small>同时下载的章节数量</small></span><output id="generalWorkersVal" class="settings-value">4</output></span>
+                    <div class="range-wrap"><input id="generalWorkers" class="search-input slider" type="range" min="1" max="10" step="1"></div>
+                  </label>
+                  <label class="settings-field settings-range-field" for="generalTimeout">
+                    <span class="settings-field-heading"><span><strong>请求超时</strong><small>单次请求最长等待，单位秒</small></span><output id="generalTimeoutVal" class="settings-value">10</output></span>
+                    <div class="range-wrap"><input id="generalTimeout" class="search-input slider" type="range" min="1" max="60" step="1"></div>
+                  </label>
+                  <label class="settings-field settings-range-field" for="generalRequestInterval">
+                    <span class="settings-field-heading"><span><strong>请求间隔</strong><small>连续请求之间的停顿，单位秒</small></span><output id="generalRequestIntervalVal" class="settings-value">0.5</output></span>
+                    <div class="range-wrap"><input id="generalRequestInterval" class="search-input slider" type="range" min="0" max="10" step="0.1"></div>
+                  </label>
+                </div>
+              </section>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>分页规模</h4><p>更大的分页会减少翻页，但增加单次加载时间。</p></div>
+                </div>
+                <div class="settings-field-grid">
+                  <label class="settings-field settings-range-field" for="generalWebPageSize">
+                    <span class="settings-field-heading"><span><strong>Web 每页数量</strong><small>搜索结果与列表扫描数量</small></span><output id="generalWebPageSizeVal" class="settings-value">50</output></span>
+                    <div class="range-wrap"><input id="generalWebPageSize" class="search-input slider" type="range" min="10" max="100" step="1"></div>
+                  </label>
+                  <label class="settings-field settings-range-field" for="generalCLIPageSize">
+                    <span class="settings-field-heading"><span><strong>CLI 每页数量</strong><small>命令行搜索的分页规模</small></span><output id="generalCLIPageSizeVal" class="settings-value">30</output></span>
+                    <div class="range-wrap"><input id="generalCLIPageSize" class="search-input slider" type="range" min="10" max="100" step="1"></div>
+                  </label>
+                </div>
+              </section>
+              <aside class="settings-tip">
+                <span class="settings-tip-icon" aria-hidden="true">i</span>
+                <p><strong>稳定优先</strong>并发过高或间隔过低时，部分站点可能返回 403 或超时。建议先使用默认值。</p>
+              </aside>
+            </section>
+
+            <section id="settingsPanelContent" class="settings-pane" role="tabpanel" aria-labelledby="settingsTabContent" hidden>
+              <div class="settings-pane-head">
+                <span class="settings-pane-eyebrow">CONTENT</span>
+                <h3>阅读与导出</h3>
+                <p>设置正文转换方式、默认导出格式和下载文件的命名规则。</p>
               </div>
-              <span class="field-help">单次网络请求等待时间。慢站点可以调高。</span>
-            </label>
-            <label class="search-field" for="generalRequestInterval">
-              <span class="field-label">请求间隔（秒）</span>
-              <div class="range-wrap">
-                <input id="generalRequestInterval" class="search-input slider" type="range" min="0" max="10" step="0.1">
-                <span id="generalRequestIntervalVal" class="range-val">0.5</span>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>正文与格式</h4><p>影响搜索结果、阅读器和导出内容。</p></div>
+                </div>
+                <div class="settings-field-grid">
+                  <label class="settings-field" for="generalLocaleStyle">
+                    <span class="settings-field-label">文字转换</span>
+                    <select id="generalLocaleStyle" class="search-input">
+                      <option value="simplified">简体中文（simplified）</option>
+                      <option value="traditional">繁體中文（traditional）</option>
+                    </select>
+                    <span class="field-help">影响搜索结果、章节标题和导出正文。</span>
+                  </label>
+                  <label class="settings-field" for="generalFormats">
+                    <span class="settings-field-label">默认导出格式</span>
+                    <input id="generalFormats" class="search-input" type="text" placeholder="txt,epub">
+                    <span class="field-help">使用逗号分隔，例如 <code>txt,epub</code>。</span>
+                  </label>
+                  <label class="settings-field settings-field-span" for="generalFilenameTemplate">
+                    <span class="settings-field-label">文件名模板</span>
+                    <input id="generalFilenameTemplate" class="search-input settings-mono-input" type="text" placeholder="{title}_{author}">
+                    <span class="field-help">支持 <code>{title}</code>、<code>{author}</code>、<code>{site}</code>、<code>{book_id}</code>。例：<code>{title}-{author}（{site}）</code>。</span>
+                  </label>
+                </div>
+              </section>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>下载内容</h4><p>选择默认抓取行为和文件命名方式。</p></div>
+                </div>
+                <div class="settings-toggle-grid">
+                  <label class="settings-toggle">
+                    <span class="settings-toggle-copy"><strong>追加时间戳</strong><small>避免同名文件覆盖</small></span>
+                    <input id="generalAppendTimestamp" type="checkbox">
+                    <span class="settings-switch" aria-hidden="true"></span>
+                  </label>
+                  <label class="settings-toggle">
+                    <span class="settings-toggle-copy"><strong>默认抓取图片</strong><small>保存正文中的插图</small></span>
+                    <input id="generalIncludePicture" type="checkbox">
+                    <span class="settings-switch" aria-hidden="true"></span>
+                  </label>
+                  <label class="settings-toggle">
+                    <span class="settings-toggle-copy"><strong>网页图片模糊</strong><small>用于遮挡封面和插图</small></span>
+                    <input id="generalBlurWebImages" type="checkbox">
+                    <span class="settings-switch" aria-hidden="true"></span>
+                  </label>
+                </div>
+              </section>
+            </section>
+
+            <section id="settingsPanelStorage" class="settings-pane" role="tabpanel" aria-labelledby="settingsTabStorage" hidden>
+              <div class="settings-pane-head">
+                <span class="settings-pane-eyebrow">STORAGE</span>
+                <h3>存储与缓存</h3>
+                <p>管理原始数据、章节缓存和导出文件的位置。修改目录后，新的任务会使用新路径。</p>
               </div>
-              <span class="field-help">同一站点连续请求之间的停顿。被限速时调高。</span>
-            </label>
-            <label class="search-field" for="generalLocaleStyle">
-              <span class="field-label">文字转换</span>
-              <select id="generalLocaleStyle" class="search-input">
-                <option value="simplified">simplified</option>
-                <option value="traditional">traditional</option>
-              </select>
-              <span class="field-help">影响搜索结果、章节标题和导出正文。</span>
-            </label>
-            <label class="search-field" for="generalFormats">
-              <span class="field-label">默认导出格式（逗号分隔）</span>
-              <input id="generalFormats" class="search-input" type="text" placeholder="txt,epub">
-              <span class="field-help">常用值：txt,epub。</span>
-            </label>
-            <label class="search-field" for="generalFilenameTemplate">
-              <span class="field-label">文件名模板</span>
-              <input id="generalFilenameTemplate" class="search-input" type="text" placeholder="{title}_{author}">
-              <span class="field-help">支持占位符：<code>{title}</code> 书名 · <code>{author}</code> 作者 · <code>{site}</code> 站点 · <code>{book_id}</code> 书 ID。例：<code>{title}-{author}（{site}）</code>。</span>
-            </label>
-            <label class="site-config-check">
-              <input id="generalAppendTimestamp" type="checkbox">
-              <span>文件名追加时间戳</span>
-            </label>
-            <label class="site-config-check">
-              <input id="generalIncludePicture" type="checkbox">
-              <span>默认抓取图片</span>
-            </label>
-            <label class="site-config-check">
-              <input id="generalDisableCache" type="checkbox">
-              <span>禁用缓存（重新抓取章节与搜索索引）</span>
-            </label>
-            <label class="site-config-check">
-              <input id="generalBlurWebImages" type="checkbox">
-              <span>Web图片模糊</span>
-            </label>
-            <label class="search-field" for="generalWebPageSize">
-              <span class="field-label">Web 每页数量</span>
-              <div class="range-wrap">
-                <input id="generalWebPageSize" class="search-input slider" type="range" min="10" max="100" step="1">
-                <span id="generalWebPageSizeVal" class="range-val">50</span>
-              </div>
-              <span class="field-help">影响搜索结果分页和列表扫描。</span>
-            </label>
-            <label class="search-field" for="generalCLIPageSize">
-              <span class="field-label">CLI 每页数量</span>
-              <div class="range-wrap">
-                <input id="generalCLIPageSize" class="search-input slider" type="range" min="10" max="100" step="1">
-                <span id="generalCLIPageSizeVal" class="range-val">30</span>
-              </div>
-            </label>
-            <label class="search-field" for="generalRawDataDir">
-              <span class="field-label">Raw 数据目录</span>
-              <input id="generalRawDataDir" class="search-input" type="text">
-              <span class="field-help">保存抓取到的原始书籍数据。</span>
-            </label>
-            <label class="search-field" for="generalCacheDir">
-              <span class="field-label">缓存目录</span>
-              <input id="generalCacheDir" class="search-input" type="text">
-              <span class="field-help">保存搜索索引、登录 Cookie 和章节缓存。</span>
-            </label>
-            <label class="search-field" for="generalOutputDir">
-              <span class="field-label">导出目录</span>
-              <input id="generalOutputDir" class="search-input" type="text">
-              <span class="field-help">txt、epub 等导出文件会保存到这里。</span>
-            </label>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>数据目录</h4><p>相对路径以程序的运行目录为基准。</p></div>
+                </div>
+                <div class="settings-field-grid settings-directory-grid">
+                  <label class="settings-field settings-field-span settings-path-field" for="generalRawDataDir">
+                    <span class="settings-field-label">Raw 数据目录</span>
+                    <input id="generalRawDataDir" class="search-input" type="text">
+                    <span class="field-help">保存抓取到的原始书籍数据。</span>
+                  </label>
+                  <label class="settings-field settings-field-span settings-path-field" for="generalCacheDir">
+                    <span class="settings-field-label">缓存目录</span>
+                    <input id="generalCacheDir" class="search-input" type="text">
+                    <span class="field-help">保存搜索索引、登录 Cookie 和章节缓存。</span>
+                  </label>
+                  <label class="settings-field settings-field-span settings-path-field" for="generalOutputDir">
+                    <span class="settings-field-label">导出目录</span>
+                    <input id="generalOutputDir" class="search-input" type="text">
+                    <span class="field-help">txt、epub 等导出文件会保存到这里。</span>
+                  </label>
+                </div>
+              </section>
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>缓存行为</h4><p>禁用缓存后会重新抓取章节和搜索索引。</p></div>
+                </div>
+                <label class="settings-toggle settings-toggle-wide">
+                  <span class="settings-toggle-copy"><strong>禁用缓存</strong><small>下一次搜索或打开章节时重新请求站点。会增加网络请求和触发限流的概率。</small></span>
+                  <input id="generalDisableCache" type="checkbox">
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+              </section>
+            </section>
           </form>
-        </section>
 
-        <section class="config-section-card">
-          <div class="config-section-head">
-            <h3>站点配置</h3>
-            <p class="config-section-desc">这里只保留认证和镜像配置的站点：Novalpie 和 ESJ Zone。</p>
-          </div>
-          <form id="siteConfigForm" class="site-config-form">
-            <label class="search-field" for="siteConfigKey">
-              <span class="field-label">站点</span>
-              <select id="siteConfigKey" class="search-input"></select>
-              <span id="siteConfigHint" class="field-help"></span>
-            </label>
-
-            <label class="search-field" for="siteUsername">
-              <span class="field-label">用户名</span>
-              <input id="siteUsername" class="search-input" type="text" autocomplete="off">
-            </label>
-
-            <label class="search-field" for="sitePassword">
-              <span class="field-label">密码</span>
-              <div class="input-icon-wrap">
-                <input id="sitePassword" class="search-input" type="password" autocomplete="off">
-                <button id="toggleSitePassword" type="button" class="input-icon-btn" aria-label="切换可见性">
-                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </button>
+          <form id="siteConfigForm" class="settings-form">
+            <section id="settingsPanelSite" class="settings-pane" role="tabpanel" aria-labelledby="settingsTabSite" hidden>
+              <div class="settings-pane-head">
+                <span class="settings-pane-eyebrow">ACCOUNTS</span>
+                <h3>站点认证</h3>
+                <p>仅在站点需要登录、加密正文或镜像访问时配置。账号与 Cookie 只保存在本机配置中。</p>
               </div>
-            </label>
-
-            <label class="search-field" for="siteCookie">
-              <span class="field-label">Cookie / Token</span>
-              <textarea id="siteCookie" class="site-config-textarea" rows="4" placeholder="Novalpie 填 Bearer eyJ...；ESJ Zone 填 name=value; name2=value2"></textarea>
-              <span id="siteCookieHelp" class="field-help"></span>
-            </label>
-
-            <label class="search-field" for="siteMirrorHosts">
-              <span class="field-label">镜像地址（每行一个）</span>
-              <textarea id="siteMirrorHosts" class="site-config-textarea" rows="3"></textarea>
-              <span class="field-help">只有站点主域不可用时再填写。</span>
-            </label>
-
+              <section class="settings-card">
+                <div class="settings-card-head">
+                  <div><h4>登录凭据</h4><p>切换站点时会自动载入已有配置。</p></div>
+                  <span id="siteConfigStatus" class="settings-status-chip" data-tone="empty">未配置</span>
+                </div>
+                <div class="settings-field-grid">
+                  <label class="settings-field settings-field-span" for="siteConfigKey">
+                    <span class="settings-field-label">配置站点</span>
+                    <select id="siteConfigKey" class="search-input"></select>
+                    <span id="siteConfigHint" class="field-help settings-site-hint"></span>
+                  </label>
+                  <label class="settings-field" for="siteUsername">
+                    <span class="settings-field-label">用户名</span>
+                    <input id="siteUsername" class="search-input" type="text" autocomplete="off" placeholder="可选">
+                  </label>
+                  <label class="settings-field" for="sitePassword">
+                    <span class="settings-field-label">密码</span>
+                    <div class="input-icon-wrap">
+                      <input id="sitePassword" class="search-input" type="password" autocomplete="off" placeholder="可选">
+                      <button id="toggleSitePassword" type="button" class="input-icon-btn" aria-label="切换密码可见性">
+                        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                      </button>
+                    </div>
+                  </label>
+                  <label class="settings-field settings-field-span" for="siteCookie">
+                    <span class="settings-field-label">Cookie / Token</span>
+                    <textarea id="siteCookie" class="site-config-textarea settings-mono-input" rows="5" placeholder="Novalpie 填 Bearer eyJ...；ESJ Zone 填 name=value; name2=value2"></textarea>
+                    <span id="siteCookieHelp" class="field-help"></span>
+                  </label>
+                  <label class="settings-field settings-field-span" for="siteMirrorHosts">
+                    <span class="settings-field-label">镜像地址</span>
+                    <textarea id="siteMirrorHosts" class="site-config-textarea settings-mono-input" rows="3" placeholder="每行一个镜像地址"></textarea>
+                    <span class="field-help">只有站点主域不可用时再填写。</span>
+                  </label>
+                </div>
+              </section>
+              <aside class="settings-tip settings-tip-security">
+                <span class="settings-tip-icon" aria-hidden="true">i</span>
+                <p><strong>凭据安全</strong>Cookie 与 Token 可能拥有账号权限，请勿截图分享或提交到公开仓库。</p>
+              </aside>
+            </section>
           </form>
-        </section>
+        </div>
       </div>
-      <div id="settingsSaveStatus" class="settings-save-status" hidden></div>
-      <div class="site-config-actions settings-config-actions">
-        <button id="saveSettingsConfig" type="button" class="search-button">保存系统设置</button>
-      </div>
+
+      <footer class="settings-modal-footer">
+        <div id="settingsSaveStatus" class="settings-save-status" role="status" aria-live="polite" hidden></div>
+        <div class="settings-footer-main">
+          <span class="settings-save-note">
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 3v5h8V3M8 17h8"></path>
+            </svg>
+            配置保存在本机
+          </span>
+          <button id="saveSettingsConfig" type="button" class="search-button settings-save-button">保存更改</button>
+        </div>
+      </footer>
     </section>
   </div>
 
