@@ -993,6 +993,7 @@ func registerBookshelfRoutes(group *gin.RouterGroup, service *Service) {
 			ChapterID     string `json:"chapter_id"`
 			ChapterIndex  int    `json:"chapter_index"`
 			ChapterTitle  string `json:"chapter_title"`
+			Page          int    `json:"page"`
 			Title         string `json:"title"`
 			Author        string `json:"author"`
 			CoverURL      string `json:"cover_url"`
@@ -1014,6 +1015,7 @@ func registerBookshelfRoutes(group *gin.RouterGroup, service *Service) {
 			ChapterID:     body.ChapterID,
 			ChapterIndex:  body.ChapterIndex,
 			ChapterTitle:  body.ChapterTitle,
+			Page:          body.Page,
 			Title:         body.Title,
 			Author:        body.Author,
 			CoverURL:      body.CoverURL,
@@ -1434,7 +1436,7 @@ func (s *Service) lookupChapterInLibrary(siteKey, bookID string, chapter model.C
 }
 
 func normalizeChapterForWeb(chapter model.Chapter, localeStyle string) model.Chapter {
-	chapter.Content = textconv.CleanAdContent(chapter.Content)
+	chapter.Content = textconv.NormalizeParagraphs(textconv.CleanAdContent(chapter.Content))
 	style := strings.ToLower(strings.TrimSpace(localeStyle))
 	if style == "" || style == "original" || style == "traditional" {
 		return chapter

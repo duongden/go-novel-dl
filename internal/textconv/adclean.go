@@ -10,8 +10,8 @@ import (
 	"golang.org/x/text/width"
 )
 
-var adDomainSuffixRe = regexp.MustCompile(`(?i)\.(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co|site|online|club|link|app|live)(?:[/:]|$)`)
-var adBareDomainSuffixRe = regexp.MustCompile(`(?i)(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co)(?:[/:]|$)`)
+var adDomainSuffixRe = regexp.MustCompile(`(?i)\.(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co|site|online|club|link|app|live)(?:[^a-z0-9]|$)`)
+var adBareDomainSuffixRe = regexp.MustCompile(`(?i)(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co)(?:[^a-z0-9]|$)`)
 var adObfuscatedEmailRe = regexp.MustCompile(`(?i)[a-z0-9][a-z0-9._%+\-]*@[a-z0-9][a-z0-9.\-]*\.(?:com|net|org|cc|me|cn|xyz|top|vip|info|io|tv|la|co|site|online|club|link|app|live)`)
 
 var adMarkers = []string{
@@ -24,10 +24,12 @@ var adMarkers = []string{
 	"点击下一页", "點擊下一頁", "本章未完",
 	"发布邮箱", "發布郵箱", "发邮件到", "發郵件到",
 	"发送任意邮件", "發送任意郵件",
+	"龙腾小说",
 }
 
 var adURLPrefixes = []string{"http://", "https://", "www."}
 var adTrailingSlogans = []string{"更多精彩", "更多彩"}
+var adLeadPhrases = []string{"最新", "寻回", "找回"}
 var adEmailLeads = []string{
 	"地址发布邮箱", "地址發布郵箱", "联系邮箱", "聯繫郵箱",
 	"发布邮箱", "發布郵箱", "电子邮箱", "電子郵箱",
@@ -83,6 +85,8 @@ func CleanAdContent(content string) string {
 func CleanAdLine(line string) string {
 	scan := compactAdLine(line)
 	line = removeAdEmailSpans(line, scan)
+	line = removeInlineDecoratedAdMarkers(line)
+	line = trimDanglingAdDecorationSuffix(line)
 	if strings.TrimSpace(line) == "" {
 		return ""
 	}
@@ -100,11 +104,52 @@ func CleanAdLine(line string) string {
 	}
 
 	prefix := strings.TrimSpace(line[:start])
+	prefix = trimAdLeadSuffix(prefix)
 	prefix = strings.TrimRightFunc(prefix, isDanglingAdRune)
 	if !containsLetterOrDigit(prefix) {
 		return ""
 	}
 	return prefix
+}
+
+func trimAdLeadSuffix(prefix string) string {
+	scan := compactAdLine(prefix)
+	if scan.value == "" {
+		return prefix
+	}
+	start := -1
+	for _, phrase := range append(adLeadPhrases, adMarkers...) {
+		compactPhrase := compactAdLine(phrase).value
+		if compactPhrase == "" || !strings.HasSuffix(scan.value, compactPhrase) {
+			continue
+		}
+		index := len(scan.value) - len(compactPhrase)
+		candidate := scan.offsets[index]
+		if start < 0 || candidate < start {
+			start = candidate
+		}
+	}
+	if start < 0 {
+		return prefix
+	}
+	return strings.TrimRightFunc(prefix[:start], isIgnoredAdRune)
+}
+
+func trimDanglingAdDecorationSuffix(line string) string {
+	trimmed := strings.TrimSpace(line)
+	last := lastRune(trimmed)
+	if !unicode.Is(unicode.So, last) && !unicode.Is(unicode.Sk, last) {
+		return line
+	}
+	trimmed = strings.TrimRightFunc(trimmed, func(value rune) bool {
+		return unicode.Is(unicode.So, value) || unicode.Is(unicode.Sk, value) ||
+			strings.ContainsRune("?？、·•‧∙…`´‘’ʹ", value)
+	})
+	trimmed = strings.TrimRightFunc(trimmed, unicode.IsSpace)
+	if trimmed == "" {
+		return ""
+	}
+	return trimmed
 }
 
 func compactAdLine(value string) compactAdText {
@@ -217,7 +262,94 @@ func isIgnoredAdRune(value rune) bool {
 	if unicode.IsSpace(value) || unicode.Is(unicode.Cf, value) || unicode.Is(unicode.Mn, value) {
 		return true
 	}
+	if unicode.Is(unicode.So, value) {
+		return true
+	}
 	return strings.ContainsRune("?？、·•‧∙…`´‘’ʹ゛゜\\｜", value)
+}
+
+func removeInlineDecoratedAdMarkers(line string) string {
+	for {
+		scan := compactAdLine(line)
+		start, end, ok := inlineDecoratedAdMarkerRange(line, scan)
+		if !ok {
+			return line
+		}
+		prefix := strings.TrimRightFunc(line[:start], isIgnoredAdRune)
+		suffix := strings.TrimLeftFunc(line[end:], isIgnoredAdRune)
+		line = strings.TrimSpace(prefix + suffix)
+	}
+}
+
+func inlineDecoratedAdMarkerRange(line string, scan compactAdText) (int, int, bool) {
+	if scan.value == "" {
+		return 0, 0, false
+	}
+	bestStart := -1
+	bestEnd := -1
+	for _, marker := range adMarkers {
+		compactMarker := compactAdLine(marker).value
+		if compactMarker == "" {
+			continue
+		}
+		index := strings.Index(scan.value, compactMarker)
+		if index < 0 || !containsLetterOrDigit(scan.value[:index]) {
+			continue
+		}
+		endIndex := index + len(compactMarker)
+		suffix := scan.value[endIndex:]
+		if !containsLetterOrDigit(suffix) || looksLikeAdContinuation(suffix) {
+			continue
+		}
+		if endIndex <= 0 || endIndex-1 >= len(scan.offsets) ||
+			index >= len(scan.offsets) {
+			continue
+		}
+		start := scan.offsets[index]
+		end := nextRuneOffset(line, scan.offsets[endIndex-1])
+		start, end = expandAdDecorationRange(line, start, end)
+		if start < 0 || end <= start || end > len(line) {
+			continue
+		}
+		if utf8.RuneCountInString(line[start:end]) <= utf8.RuneCountInString(compactMarker) {
+			continue
+		}
+		if bestStart < 0 || start < bestStart {
+			bestStart = start
+			bestEnd = end
+		}
+	}
+	return bestStart, bestEnd, bestStart >= 0
+}
+
+func looksLikeAdContinuation(value string) bool {
+	if adDomainSuffixRe.MatchString(value) || adObfuscatedEmailRe.MatchString(value) {
+		return true
+	}
+	for _, prefix := range adURLPrefixes {
+		if strings.Contains(value, prefix) {
+			return true
+		}
+	}
+	return strings.Contains(value, "邮箱") || strings.Contains(value, "郵箱")
+}
+
+func expandAdDecorationRange(line string, start, end int) (int, int) {
+	for start > 0 {
+		previous, size := utf8.DecodeLastRuneInString(line[:start])
+		if !isIgnoredAdRune(previous) {
+			break
+		}
+		start -= size
+	}
+	for end < len(line) {
+		next, size := utf8.DecodeRuneInString(line[end:])
+		if !isIgnoredAdRune(next) {
+			break
+		}
+		end += size
+	}
+	return start, end
 }
 
 func removeAdEmailSpans(line string, scan compactAdText) string {
@@ -316,7 +448,25 @@ func adMarkerOffset(scan compactAdText) int {
 			offset = candidate
 		}
 	}
+	if contextual := adContextualMarkerOffset(scan); contextual >= 0 && (offset < 0 || contextual < offset) {
+		offset = contextual
+	}
 	return offset
+}
+
+func adContextualMarkerOffset(scan compactAdText) int {
+	for _, marker := range []string{"请记住"} {
+		index := strings.Index(scan.value, marker)
+		if index < 0 {
+			continue
+		}
+		tail := scan.value[index:]
+		if strings.Contains(tail, "邮箱") || strings.Contains(tail, "@") ||
+			strings.Contains(tail, ".com") || strings.Contains(tail, ".me") {
+			return scan.offsets[index]
+		}
+	}
+	return -1
 }
 
 func adURLStart(scan compactAdText) int {

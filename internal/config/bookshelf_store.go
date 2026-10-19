@@ -31,6 +31,7 @@ type bookshelfItem struct {
 	LastReadChapterID    string `gorm:"size:256"`
 	LastReadChapterIndex int    `gorm:"default:0"`
 	LastReadChapterTitle string `gorm:"size:512"`
+	LastReadPage         int    `gorm:"default:1"`
 	LastReadAt           *time.Time
 	Implicit             bool      `gorm:"default:false;index"`
 	AddedAt              time.Time `gorm:"autoCreateTime"`
@@ -67,6 +68,7 @@ type BookshelfItem struct {
 	LastReadChapterID    string     `json:"last_read_chapter_id,omitempty"`
 	LastReadChapterIndex int        `json:"last_read_chapter_index,omitempty"`
 	LastReadChapterTitle string     `json:"last_read_chapter_title,omitempty"`
+	LastReadPage         int        `json:"last_read_page,omitempty"`
 	LastReadAt           *time.Time `json:"last_read_at,omitempty"`
 	Implicit             bool       `json:"implicit,omitempty"`
 	AddedAt              time.Time  `json:"added_at"`
@@ -106,6 +108,7 @@ type BookshelfMutation struct {
 	LastReadChapterID    *string
 	LastReadChapterIndex *int
 	LastReadChapterTitle *string
+	LastReadPage         *int
 	LastReadAt           *time.Time
 }
 
@@ -465,6 +468,13 @@ func UpdateBookshelfItem(id uint, patch BookshelfMutation) (BookshelfItem, error
 	if patch.LastReadChapterTitle != nil {
 		entry.LastReadChapterTitle = strings.TrimSpace(*patch.LastReadChapterTitle)
 	}
+	if patch.LastReadPage != nil {
+		value := *patch.LastReadPage
+		if value < 1 {
+			value = 1
+		}
+		entry.LastReadPage = value
+	}
 	if patch.LastReadAt != nil {
 		stamp := *patch.LastReadAt
 		entry.LastReadAt = &stamp
@@ -545,6 +555,7 @@ type BookshelfProgressInput struct {
 	ChapterID     string
 	ChapterIndex  int
 	ChapterTitle  string
+	Page          int
 	Title         string
 	Author        string
 	CoverURL      string
@@ -572,6 +583,10 @@ func UpdateBookshelfProgress(input BookshelfProgressInput) (BookshelfItem, bool,
 	if index < 0 {
 		index = 0
 	}
+	page := input.Page
+	if page < 1 {
+		page = 1
+	}
 	now := time.Now().UTC()
 
 	var entry bookshelfItem
@@ -580,6 +595,7 @@ func UpdateBookshelfProgress(input BookshelfProgressInput) (BookshelfItem, bool,
 		entry.LastReadChapterID = strings.TrimSpace(input.ChapterID)
 		entry.LastReadChapterIndex = index
 		entry.LastReadChapterTitle = strings.TrimSpace(input.ChapterTitle)
+		entry.LastReadPage = page
 		entry.LastReadAt = &now
 		if value := strings.TrimSpace(input.Title); value != "" && entry.Title == "" {
 			entry.Title = value
@@ -626,6 +642,7 @@ func UpdateBookshelfProgress(input BookshelfProgressInput) (BookshelfItem, bool,
 		LastReadChapterID:    strings.TrimSpace(input.ChapterID),
 		LastReadChapterIndex: index,
 		LastReadChapterTitle: strings.TrimSpace(input.ChapterTitle),
+		LastReadPage:         page,
 		LastReadAt:           &now,
 		Implicit:             true,
 	}
@@ -755,6 +772,7 @@ func toBookshelfItem(entry bookshelfItem) BookshelfItem {
 		LastReadChapterID:    entry.LastReadChapterID,
 		LastReadChapterIndex: entry.LastReadChapterIndex,
 		LastReadChapterTitle: entry.LastReadChapterTitle,
+		LastReadPage:         entry.LastReadPage,
 		LastReadAt:           entry.LastReadAt,
 		Implicit:             entry.Implicit,
 		AddedAt:              entry.AddedAt,

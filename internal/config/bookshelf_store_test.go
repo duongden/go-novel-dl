@@ -200,6 +200,7 @@ func TestBookshelfReadingProgressAndHistory(t *testing.T) {
 		ChapterID:    "ch-1",
 		ChapterIndex: 0,
 		ChapterTitle: "第一章",
+		Page:         6,
 		Title:        "Missing Book",
 		Author:       "Anon",
 	})
@@ -214,6 +215,9 @@ func TestBookshelfReadingProgressAndHistory(t *testing.T) {
 	}
 	if implicit.Title != "Missing Book" || implicit.Author != "Anon" {
 		t.Fatalf("implicit row should carry submitted metadata, got %+v", implicit)
+	}
+	if implicit.LastReadPage != 6 {
+		t.Fatalf("expected implicit row page 6, got %+v", implicit)
 	}
 
 	// Implicit rows must stay out of bookshelf listings.
@@ -233,6 +237,7 @@ func TestBookshelfReadingProgressAndHistory(t *testing.T) {
 		ChapterID:    "ch-7",
 		ChapterIndex: 6,
 		ChapterTitle: " 第七章 ",
+		Page:         4,
 	})
 	if err != nil || !found {
 		t.Fatalf("update progress A: err=%v found=%v", err, found)
@@ -245,6 +250,9 @@ func TestBookshelfReadingProgressAndHistory(t *testing.T) {
 	}
 	if itemA.LastReadChapterTitle != "第七章" {
 		t.Fatalf("expected trimmed chapter title, got %q", itemA.LastReadChapterTitle)
+	}
+	if itemA.LastReadPage != 4 {
+		t.Fatalf("expected page 4, got %+v", itemA)
 	}
 	if itemA.LastReadAt == nil {
 		t.Fatalf("expected last_read_at to be set")
@@ -383,6 +391,7 @@ func TestFindBookshelfProgress(t *testing.T) {
 		ChapterID:    "ch-2",
 		ChapterIndex: 1,
 		ChapterTitle: "第二章",
+		Page:         3,
 		Title:        "History Only",
 	})
 	if err != nil {
@@ -397,5 +406,8 @@ func TestFindBookshelfProgress(t *testing.T) {
 	}
 	if found.LastReadChapterID != "ch-2" || found.LastReadChapterIndex != 1 {
 		t.Fatalf("expected reading progress on lookup, got %+v", found)
+	}
+	if found.LastReadPage != 3 {
+		t.Fatalf("expected page progress on lookup, got %+v", found)
 	}
 }

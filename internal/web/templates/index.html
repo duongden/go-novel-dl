@@ -6,6 +6,15 @@
   <meta name="referrer" content="no-referrer">
   <title>Novel DL 聚合搜索与下载</title>
   <link rel="icon" type="image/png" sizes="256x256" href="{{ .Root }}/icon-256.png">
+  <script>
+    try {
+      const savedTheme = JSON.parse(localStorage.getItem("reader-settings") || "{}").theme;
+      const allowedThemes = ["paper", "white", "mint", "blue", "rose", "night"];
+      document.documentElement.dataset.appTheme = allowedThemes.includes(savedTheme) ? savedTheme : "paper";
+    } catch (_) {
+      document.documentElement.dataset.appTheme = "paper";
+    }
+  </script>
   <link rel="stylesheet" href="{{ .Root }}/style.css">
 </head>
 <body>
@@ -403,6 +412,13 @@
                 <h3>阅读与导出</h3>
                 <p>设置正文转换方式、默认导出格式和下载文件的命名规则。</p>
               </div>
+              <section class="settings-card appearance-settings-card">
+                <div class="settings-card-head">
+                  <div><h4>界面与阅读背景</h4><p>主页面与阅读器共用同一个主题，退出阅读器后仍保持舒适亮度。</p></div>
+                  <span class="settings-card-badge">全局生效</span>
+                </div>
+                <div id="appearanceThemeOptions" class="appearance-theme-options" role="radiogroup" aria-label="界面背景主题"></div>
+              </section>
               <section class="settings-card">
                 <div class="settings-card-head">
                   <div><h4>正文与格式</h4><p>影响搜索结果、阅读器和导出内容。</p></div>

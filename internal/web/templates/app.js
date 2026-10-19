@@ -109,7 +109,7 @@ const appState = {
     sourceURL: "",
     localOnly: false,
     progressTimer: 0,
-    lastReportedChapterID: "",
+    lastReportedProgressKey: "",
   },
   detailCache: new Map(),
   detailPending: new Map(),
@@ -2370,7 +2370,7 @@ function ensureReaderPageViewport() {
 readerPageViewport = ensureReaderPageViewport();
 
 const READER_SESSION_KEY = "novel-dl:reader-session";
-const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v6";
+const READER_CONTENT_CACHE_KEY = "novel-dl:reader-content-cache:v9";
 const READER_CONTENT_CACHE_LIMIT = 32;
 const READER_CONTENT_CACHE_MAX_CHARS = 2000000;
 const READER_PAGE_SWIPE_THRESHOLD = 52;
@@ -2793,6 +2793,10 @@ function setReaderPagePosition(index, options = {}) {
 
   prefetchReaderAdjacentChapters();
   scheduleReaderSessionPersist();
+  scheduleProgressReport(
+    readerState.chapters[readerState.currentIndex],
+    readerState.currentIndex,
+  );
 }
 
 function setReaderPageOffset(offset) {
@@ -2878,7 +2882,7 @@ function closeReader() {
     appState.reader.latestChapter = "";
     appState.reader.sourceURL = "";
     appState.reader.localOnly = false;
-    appState.reader.lastReportedChapterID = "";
+    appState.reader.lastReportedProgressKey = "";
   }
   syncAppURL();
 }
@@ -3680,23 +3684,25 @@ window.addEventListener("pageshow", (event) => {
   if (event.persisted) restoreReaderPageFromSession();
 });
 
-// Reader background color picker
-const readerThemes = [
-  { key: "paper", label: "米纸", bg: "#f8f2e6", text: "#4b3f35" },
-  { key: "white", label: "白色", bg: "#ffffff", text: "#243044" },
-  { key: "mint", label: "浅青", bg: "#eefaf5", text: "#243b3f" },
-  { key: "blue", label: "浅蓝", bg: "#eef6ff", text: "#27364a" },
-  { key: "rose", label: "浅粉", bg: "#fff1f2", text: "#4a2d35" },
-  { key: "night", label: "夜间", bg: "#000000", text: "#d9e2ec", night: true },
+// The same palette is applied to the entire application and the reader.
+const appThemes = [
+  { key: "paper", label: "米纸", description: "温暖柔和", bg: "#f8f2e6", text: "#4b3f35" },
+  { key: "white", label: "白色", description: "清爽明亮", bg: "#ffffff", text: "#243044" },
+  { key: "mint", label: "浅青", description: "低饱和绿", bg: "#eefaf5", text: "#243b3f" },
+  { key: "blue", label: "浅蓝", description: "安静冷色", bg: "#eef6ff", text: "#27364a" },
+  { key: "rose", label: "浅粉", description: "柔和暖色", bg: "#fff1f2", text: "#4a2d35" },
+  { key: "night", label: "夜间", description: "深色低亮度", bg: "#000000", text: "#d9e2ec", night: true },
 ];
 
 function initReaderSettings() {
+  const settings = loadReaderSettings();
+  applyReaderSettings(settings);
+  renderAppearanceThemeOptions(settings);
   const picker = document.getElementById("readerBgPicker");
   if (!picker) return;
   picker.innerHTML = "";
-  const settings = loadReaderSettings();
 
-  readerThemes.forEach((theme) => {
+  appThemes.forEach((theme) => {
     const dot = document.createElement("button");
     dot.type = "button";
     dot.className = "reader-bg-dot" + (theme.key === settings.theme ? " is-active" : "");
@@ -3704,10 +3710,7 @@ function initReaderSettings() {
     dot.title = theme.label;
     dot.setAttribute("aria-label", `阅读背景：${theme.label}`);
     dot.addEventListener("click", () => {
-      const next = { ...loadReaderSettings(), theme: theme.key };
-      saveReaderSettings(next);
-      applyReaderSettings(next);
-      renderReaderThemeActive();
+      selectAppTheme(theme.key);
     });
     picker.appendChild(dot);
   });
@@ -3739,21 +3742,60 @@ function initReaderSettings() {
   nightButton.textContent = "夜间";
   nightButton.addEventListener("click", () => {
     const current = loadReaderSettings();
-    const next = { ...current, theme: current.theme === "night" ? "paper" : "night" };
-    saveReaderSettings(next);
-    applyReaderSettings(next);
-    renderReaderThemeActive();
+    selectAppTheme(current.theme === "night" ? "paper" : "night");
   });
   picker.appendChild(nightButton);
-  applyReaderSettings(settings);
+}
+
+function renderAppearanceThemeOptions(settings) {
+  const container = document.getElementById("appearanceThemeOptions");
+  if (!container) return;
+  container.innerHTML = "";
+  appThemes.forEach((theme) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "appearance-theme-button" + (theme.key === settings.theme ? " is-active" : "");
+    button.dataset.themeKey = theme.key;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(theme.key === settings.theme));
+    button.setAttribute("aria-label", `${theme.label}主题：${theme.description}`);
+
+    const swatch = document.createElement("span");
+    swatch.className = "appearance-theme-swatch";
+    swatch.style.background = theme.bg;
+
+    const copy = document.createElement("span");
+    copy.className = "appearance-theme-copy";
+    const label = document.createElement("strong");
+    label.textContent = theme.label;
+    const description = document.createElement("small");
+    description.textContent = theme.description;
+    copy.append(label, description);
+    button.append(swatch, copy);
+    button.addEventListener("click", () => selectAppTheme(theme.key));
+    container.appendChild(button);
+  });
+}
+
+function selectAppTheme(themeKey) {
+  const current = loadReaderSettings();
+  const next = { ...current, theme: themeKey };
+  saveReaderSettings(next);
+  applyReaderSettings(next);
+  renderReaderThemeActive();
 }
 
 function renderReaderThemeActive() {
   const settings = loadReaderSettings();
+  document.querySelectorAll(".appearance-theme-button").forEach((button) => {
+    const active = button.dataset.themeKey === settings.theme;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-checked", String(active));
+  });
   const picker = document.getElementById("readerBgPicker");
   if (!picker) return;
   picker.querySelectorAll(".reader-bg-dot").forEach((dot, index) => {
-    dot.classList.toggle("is-active", readerThemes[index] && readerThemes[index].key === settings.theme);
+    dot.classList.toggle("is-active", appThemes[index] && appThemes[index].key === settings.theme);
   });
 }
 
@@ -3761,7 +3803,7 @@ function loadReaderSettings() {
   const fallback = { theme: "paper", fontSize: 18 };
   try {
     const parsed = JSON.parse(localStorage.getItem("reader-settings") || "{}");
-    const theme = readerThemes.some((item) => item.key === parsed.theme) ? parsed.theme : fallback.theme;
+    const theme = appThemes.some((item) => item.key === parsed.theme) ? parsed.theme : fallback.theme;
     const fontSize = [14, 16, 18, 20, 22, 24].includes(Number(parsed.fontSize)) ? Number(parsed.fontSize) : fallback.fontSize;
     return { theme, fontSize };
   } catch {
@@ -3774,7 +3816,8 @@ function saveReaderSettings(settings) {
 }
 
 function applyReaderSettings(settings) {
-  const theme = readerThemes.find((item) => item.key === settings.theme) || readerThemes[0];
+  const theme = appThemes.find((item) => item.key === settings.theme) || appThemes[0];
+  document.documentElement.dataset.appTheme = theme.key;
   readerOverlay.style.setProperty("--reader-bg", theme.bg);
   readerOverlay.style.setProperty("--reader-text", theme.text);
   readerContent.style.fontSize = `${settings.fontSize || 18}px`;
@@ -4872,10 +4915,11 @@ function renderHistoryCard(item) {
   const meta = document.createElement("div");
   meta.className = "history-meta";
   meta.appendChild(resultBadge(sourceLabel(item.site)));
+  const resumePage = Math.max(1, Number(item.last_read_page) || 1);
   if (item.last_read_chapter_title) {
-    meta.appendChild(resultBadge(`读到：${item.last_read_chapter_title}`));
+    meta.appendChild(resultBadge(`读到：${item.last_read_chapter_title} · 第 ${resumePage} 页`));
   } else if (item.last_read_chapter_id) {
-    meta.appendChild(resultBadge(`已读章节 ${item.last_read_chapter_index + 1 || ""}`.trim()));
+    meta.appendChild(resultBadge(`已读第 ${item.last_read_chapter_index + 1 || ""} 章 · 第 ${resumePage} 页`.trim()));
   }
   if (item.total_chapters > 0) {
     const idx = Math.max(0, item.last_read_chapter_index || 0);
@@ -4911,8 +4955,10 @@ function formatHistoryTimestamp(iso) {
 }
 
 async function openHistoryReader(item) {
-  // History items have the same shape as bookshelf items, so reuse the bookshelf flow.
-  await openBookshelfReader(item, null);
+  const resumePage = Math.max(1, Number(item.last_read_page) || 1);
+  await openBookshelfReader(item, null, {
+    readerOptions: { pageIndex: resumePage - 1 },
+  });
 }
 
 async function reportReadingProgress(payload) {
@@ -4938,6 +4984,7 @@ function buildProgressPayload(tracker, chapter, index) {
     chapter_id: String((chapter && (chapter.chapter_id || chapter.id)) || "").trim(),
     chapter_index: Math.max(0, index || 0),
     chapter_title: (chapter && chapter.title) || "",
+    page: Math.max(1, readerState.pageIndex + 1),
     title: tracker.title || "",
     author: tracker.author || "",
     cover_url: tracker.coverURL || "",
@@ -4952,8 +4999,10 @@ function scheduleProgressReport(chapter, index) {
   if (!tracker || !tracker.site || !tracker.bookID) return;
   const chapterID = String((chapter && (chapter.chapter_id || chapter.id)) || "").trim();
   if (!chapterID) return;
-  if (chapterID === tracker.lastReportedChapterID) return;
-  tracker.lastReportedChapterID = chapterID;
+  const page = Math.max(1, readerState.pageIndex + 1);
+  const progressKey = `${chapterID}:${page}`;
+  if (progressKey === tracker.lastReportedProgressKey) return;
+  tracker.lastReportedProgressKey = progressKey;
   if (tracker.progressTimer) window.clearTimeout(tracker.progressTimer);
   const payload = buildProgressPayload(tracker, chapter, index);
   tracker.progressTimer = window.setTimeout(() => {
@@ -5241,11 +5290,14 @@ async function continueReadingFromDetail(result, variant, detail, button) {
     item.last_read_chapter_id = progress.last_read_chapter_id || "";
     item.last_read_chapter_index = progress.last_read_chapter_index || 0;
     item.last_read_chapter_title = progress.last_read_chapter_title || "";
+    item.last_read_page = Math.max(1, progress.last_read_page || 1);
   }
   // openBookshelfReader 会改写详情状态，这里保留原详情以便阅读器「返回」时恢复。
   const savedResult = appState.detailResult;
   const savedVariant = appState.activeDetailVariant;
-  await openBookshelfReader(item, button);
+  await openBookshelfReader(item, button, {
+    readerOptions: { pageIndex: Math.max(0, Number(item.last_read_page || 1) - 1) },
+  });
   appState.detailResult = savedResult;
   appState.activeDetailVariant = savedVariant;
 }
@@ -5287,7 +5339,12 @@ async function openBookshelfReader(item, button, options = {}) {
       sourceURL: item.source_url || "",
     });
     const startIndex = resolveBookshelfStartIndex(chapters, item);
-    openReader(chapters, startIndex, (options && options.readerOptions) || {});
+    const readerOptions = { ...((options && options.readerOptions) || {}) };
+    const savedPageIndex = Math.max(0, (Number(item.last_read_page) || 1) - 1);
+    if (!Number.isFinite(Number(readerOptions.pageIndex)) && savedPageIndex > 0) {
+      readerOptions.pageIndex = savedPageIndex;
+    }
+    openReader(chapters, startIndex, readerOptions);
     const sourceTag = localOnly ? "本地缓存" : "在线";
     if (startIndex > 0) {
       const startChapter = chapters[startIndex];
@@ -5365,5 +5422,5 @@ function setupReaderTracker(site, bookID, title, options = {}) {
   tracker.latestChapter = String(opts.latestChapter || opts.latest_chapter || "").trim();
   tracker.sourceURL = String(opts.sourceURL || opts.source_url || "").trim();
   tracker.localOnly = Boolean(opts.localOnly);
-  tracker.lastReportedChapterID = "";
+  tracker.lastReportedProgressKey = "";
 }

@@ -1245,13 +1245,69 @@ func TestSearchEndpointAppliesLocaleConversion(t *testing.T) {
 
 func TestNormalizeChapterForWebCleansObfuscatedAds(t *testing.T) {
 	chapter := model.Chapter{
-		Content: "第一段正文。\n>ht\\tｐ://www?ltxsdz?ｃｏｍ.ｃoｍ http://m.ltxswu.me/book/57430/\n凌晨两点，程晓羽还在做与音乐相关的工作。шщш.LтｘＳdz.соｍ\n1.哥哥，我喜欢你啊。发布页Ltxsdz…℃〇M更多彩\n第二段正文。",
+		Content: "第一段正文。\n>ht\\tｐ://www?ltxsdz?ｃｏｍ.ｃoｍ http://m.ltxswu.me/book/57430/\n凌晨两点，程晓羽还在做与音乐相关的工作。шщш.LтｘＳdz.соｍ\n1.哥哥，我喜欢你啊。发布页Ltxsdz…℃〇M更多彩\n平心而论，我妈杨菲菲是个很漂亮的女人。「请记住/\\邮箱：ltxsba/@\\Gmail.com /\\发任意内容找|回」\n她推开窗，看见我妈已经坐在石\n阶\n上了，手里拿着一杯水。\n我爸这几天也一直在。龙腾小说.com他那个项目好像告一段落了。\n第二段正文。",
 	}
 
 	got := normalizeChapterForWeb(chapter, "original")
-	want := "第一段正文。\n凌晨两点，程晓羽还在做与音乐相关的工作。\n1.哥哥，我喜欢你啊。\n第二段正文。"
+	want := "第一段正文。\n凌晨两点，程晓羽还在做与音乐相关的工作。\n1.哥哥，我喜欢你啊。\n平心而论，我妈杨菲菲是个很漂亮的女人。\n她推开窗，看见我妈已经坐在石阶上了，手里拿着一杯水。\n我爸这几天也一直在。\n第二段正文。"
 	if got.Content != want {
 		t.Fatalf("unexpected cleaned content:\n got: %q\nwant: %q", got.Content, want)
+	}
+}
+
+func TestGlobalThemeAndExactPageResumeAssets(t *testing.T) {
+	htmlData, err := templateFS.ReadFile("templates/index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	markup := string(htmlData)
+	for _, needle := range []string{
+		`document.documentElement.dataset.appTheme`,
+		`id="appearanceThemeOptions"`,
+		`主页面与阅读器共用同一个主题`,
+	} {
+		if !strings.Contains(markup, needle) {
+			t.Fatalf("expected global theme markup to contain %s", needle)
+		}
+	}
+
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`const appThemes = [`,
+		`document.documentElement.dataset.appTheme = theme.key`,
+		`page: Math.max(1, readerState.pageIndex + 1)`,
+		`const savedPageIndex = Math.max(0, (Number(item.last_read_page) || 1) - 1)`,
+		`readerOptions.pageIndex = savedPageIndex`,
+		`第 ${resumePage} 页`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected global theme and page resume script to contain %s", needle)
+		}
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`html[data-app-theme="paper"]`,
+		`html[data-app-theme="night"]`,
+		`.appearance-theme-options`,
+		`.appearance-theme-button.is-active`,
+		`html[data-app-theme] .source-filters-toggle`,
+		`html[data-app-theme] .source-tag-panel`,
+		`html[data-app-theme] .source-option.is-selected`,
+		`html[data-app-theme] .task-card`,
+		`grid-template-columns: repeat(2, minmax(0, 1fr))`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected global theme style to contain %s", needle)
+		}
 	}
 }
 
