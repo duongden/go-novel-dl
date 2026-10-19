@@ -37,10 +37,10 @@ var fanqieMapRaw string
 var fanqieMap = mustLoadSubstMap(fanqieMapRaw)
 
 type FanqieNovelSite struct {
-	cfg          config.ResolvedSiteConfig
-	html         HTMLSite
-	client       *http.Client
-	searchURL    string
+	cfg       config.ResolvedSiteConfig
+	html      HTMLSite
+	client    *http.Client
+	searchURL string
 }
 
 func NewFanqieNovelSite(cfg config.ResolvedSiteConfig) *FanqieNovelSite {
@@ -115,9 +115,9 @@ func (s *FanqieNovelSite) DownloadPlan(ctx context.Context, ref model.BookRef) (
 	book := &model.Book{
 		Site:         s.Key(),
 		ID:           ref.BookID,
-		Title:        stringValue(page["bookName"]),
-		Author:       fallback(stringValue(page["authorName"]), stringValue(page["author"])),
-		Description:  fallback(stringValue(page["abstract"]), stringValue(page["description"])),
+		Title:        applySubstMap(stringValue(page["bookName"]), fanqieMap),
+		Author:       applySubstMap(fallback(stringValue(page["authorName"]), stringValue(page["author"])), fanqieMap),
+		Description:  applySubstMap(fallback(stringValue(page["abstract"]), stringValue(page["description"])), fanqieMap),
 		SourceURL:    fmt.Sprintf("https://fanqienovel.com/page/%s", ref.BookID),
 		CoverURL:     fallback(stringValue(page["thumbUrl"]), stringValue(page["thumbUri"])),
 		DownloadedAt: time.Now().UTC(),
@@ -155,7 +155,7 @@ func (s *FanqieNovelSite) FetchChapter(ctx context.Context, bookID string, chapt
 	var payload struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
-		Data struct {
+		Data    struct {
 			Content string `json:"content"`
 		} `json:"data"`
 	}
@@ -277,11 +277,11 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 				results = append(results, model.SearchResult{
 					Site:          s.Key(),
 					BookID:        bookID,
-					Title:         title,
-					Author:        author,
-					Description:   description,
+					Title:         applySubstMap(title, fanqieMap),
+					Author:        applySubstMap(author, fanqieMap),
+					Description:   applySubstMap(description, fanqieMap),
 					URL:           fmt.Sprintf("https://fanqienovel.com/page/%s", bookID),
-					LatestChapter: stringValue(book["last_chapter_title"]),
+					LatestChapter: applySubstMap(stringValue(book["last_chapter_title"]), fanqieMap),
 					CoverURL:      cover,
 				})
 				if len(results) >= limit {

@@ -40,6 +40,9 @@
       <button type="button" id="searchTabButton" class="tab-button is-active" data-tab="search">
         搜索
       </button>
+      <button type="button" id="discoverTabButton" class="tab-button" data-tab="discover" aria-controls="discoverTabPanel">
+        发现
+      </button>
       <button type="button" id="favoritesTabButton" class="tab-button" data-tab="favorites">
         收藏
       </button>
@@ -131,6 +134,64 @@
           </div>
         </section>
       </div>
+    </section>
+
+    <section id="discoverTabPanel" class="tab-panel" aria-labelledby="discoverTabButton">
+      <section class="panel-card discover-hero">
+        <div class="discover-hero-copy">
+          <span class="discover-kicker">DISCOVER</span>
+          <h2>发现下一本好书</h2>
+          <p>从原站榜单与官方书单里找到大家正在读的作品，点击即可进入现有详情与阅读流程。</p>
+        </div>
+        <nav id="discoverSectionTabs" class="discover-section-tabs" role="tablist" aria-label="发现内容">
+          <button type="button" class="discover-section-tab is-active" data-discover-section="trending" role="tab" aria-selected="true">
+            大家都在读
+          </button>
+          <button type="button" class="discover-section-tab" data-discover-section="ranking" role="tab" aria-selected="false">
+            排行榜
+          </button>
+          <button type="button" class="discover-section-tab" data-discover-section="booklist" role="tab" aria-selected="false">
+            书单推荐
+          </button>
+        </nav>
+      </section>
+
+      <div id="discoverWarnings" class="discover-warning-stack" hidden aria-live="polite"></div>
+
+      <section id="discoverTrendingPanel" class="panel-card discover-panel">
+        <div class="discover-panel-head">
+          <div>
+            <span class="discover-eyebrow">TRENDING NOW</span>
+            <h2>全站正在读</h2>
+            <p class="panel-hint">按来源交错展示，避免单一渠道占满推荐位。</p>
+          </div>
+          <span id="discoverTrendingCount" class="count-badge">0</span>
+        </div>
+        <div id="discoverTrendingStatus" class="discover-status" role="status">正在汇总各渠道热读作品…</div>
+        <div id="discoverTrendingGrid" class="discover-book-grid"></div>
+      </section>
+
+      <section id="discoverCatalogPanel" class="panel-card discover-panel" hidden>
+        <div class="discover-panel-head">
+          <div>
+            <span class="discover-eyebrow">CURATED BY SOURCE</span>
+            <h2 id="discoverCatalogTitle">排行榜</h2>
+            <p id="discoverCatalogHint" class="panel-hint">选择渠道，再进入榜单查看当前热门作品。</p>
+          </div>
+        </div>
+        <nav id="discoverSiteTabs" class="discover-site-tabs" aria-label="发现渠道"></nav>
+        <div id="discoverStatus" class="discover-status" role="status">正在读取渠道榜单…</div>
+        <div id="discoverListGrid" class="discover-list-grid"></div>
+      </section>
+
+      <section id="discoverListPanel" class="panel-card discover-panel discover-list-panel" hidden>
+        <button type="button" id="discoverBackButton" class="discover-back-button">
+          <span aria-hidden="true">←</span> 返回榜单
+        </button>
+        <div id="discoverListHeader" class="discover-list-header"></div>
+        <div id="discoverBookStatus" class="discover-status" role="status"></div>
+        <div id="discoverBookGrid" class="discover-book-grid"></div>
+      </section>
     </section>
 
     <section id="favoritesTabPanel" class="tab-panel">

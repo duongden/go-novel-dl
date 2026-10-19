@@ -58,6 +58,7 @@ type Service struct {
 	SiteConfigs    []config.SiteCatalogRecord
 	ParamSupports  []config.SiteParameterSupport
 	ContentCache   *webContentCache
+	DiscoveryCache *webDiscoveryCache
 	cacheMu        sync.Mutex
 }
 
@@ -216,6 +217,7 @@ func newService(configPath string) (*Service, error) {
 		SiteConfigs:    siteConfigs,
 		ParamSupports:  paramSupports,
 		ContentCache:   newWebContentCache(),
+		DiscoveryCache: newWebDiscoveryCache(),
 	}, nil
 }
 
@@ -247,6 +249,9 @@ func (s *Service) reloadRuntime() error {
 	s.SiteConfigs, _ = config.ListSiteCatalog()
 	s.ParamSupports = config.SiteParameterSupports()
 	s.resetContentCache()
+	s.cacheMu.Lock()
+	s.DiscoveryCache = newWebDiscoveryCache()
+	s.cacheMu.Unlock()
 	return nil
 }
 
@@ -597,6 +602,9 @@ func newRouter(service *Service) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"cached": cached})
 	})
+	group.GET("/api/discovery/catalog", service.handleDiscoveryCatalog)
+	group.GET("/api/discovery/list", service.handleDiscoveryList)
+	group.GET("/api/discovery/trending", service.handleDiscoveryTrending)
 	group.POST("/api/search", func(c *gin.Context) {
 		var req searchRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

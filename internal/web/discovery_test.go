@@ -1,0 +1,225 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/guohuiyuan/go-novel-dl/internal/config"
+	"github.com/guohuiyuan/go-novel-dl/internal/model"
+	"github.com/guohuiyuan/go-novel-dl/internal/site"
+)
+
+type fakeDiscoveryWebSite struct {
+	fakeWebSite
+	lists    []site.DiscoveryList
+	books    map[string][]model.SearchResult
+	listsErr error
+	booksErr error
+}
+
+func (s fakeDiscoveryWebSite) DiscoveryLists(ctx context.Context) ([]site.DiscoveryList, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.listsErr != nil {
+		return nil, s.listsErr
+	}
+	return append([]site.DiscoveryList(nil), s.lists...), nil
+}
+
+func (s fakeDiscoveryWebSite) DiscoveryBooks(ctx context.Context, listID string, limit int) ([]model.SearchResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.booksErr != nil {
+		return nil, s.booksErr
+	}
+	items := append([]model.SearchResult(nil), s.books[listID]...)
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func registerFakeDiscoverySite(
+	service *Service,
+	key string,
+	name string,
+	lists []site.DiscoveryList,
+	books map[string][]model.SearchResult,
+	listsErr error,
+) {
+	service.Runtime.Registry.Register(key, func(config.ResolvedSiteConfig) site.Site {
+		return fakeDiscoveryWebSite{
+			fakeWebSite: fakeWebSite{
+				key:         key,
+				displayName: name,
+				capabilities: site.Capabilities{
+					Download: true,
+					Search:   true,
+				},
+			},
+			lists:    lists,
+			books:    books,
+			listsErr: listsErr,
+		}
+	})
+}
+
+func discoveryTestGet(t *testing.T, service *Service, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	resp := httptest.NewRecorder()
+	newRouter(service).ServeHTTP(resp, req)
+	return resp
+}
+
+func TestDiscoveryCatalogKeepsHealthySitesWhenAnotherSiteFails(t *testing.T) {
+	service := newTestService()
+	registerFakeDiscoverySite(service, "rank-a", "榜单 A", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Kind: "ranking"},
+	}, nil, nil)
+	registerFakeDiscoverySite(service, "rank-broken", "故障渠道", nil, nil, errors.New("temporary upstream failure"))
+
+	resp := discoveryTestGet(t, service, RoutePrefix+"/api/discovery/catalog?sites=rank-a,rank-broken")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload discoveryCatalogResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode catalog response: %v", err)
+	}
+	if len(payload.Sites) != 1 || payload.Sites[0].Site != "rank-a" {
+		t.Fatalf("expected one healthy site, got %+v", payload.Sites)
+	}
+	if len(payload.Warnings) != 1 || payload.Warnings[0].Site != "rank-broken" {
+		t.Fatalf("expected one warning for the failed site, got %+v", payload.Warnings)
+	}
+	if !strings.Contains(payload.Warnings[0].Error, "temporary upstream failure") {
+		t.Fatalf("unexpected warning: %+v", payload.Warnings[0])
+	}
+}
+
+func TestDiscoveryCatalogFiltersByKind(t *testing.T) {
+	service := newTestService()
+	registerFakeDiscoverySite(service, "rank-a", "榜单 A", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Kind: "ranking"},
+		{ID: "curated", Name: "编辑书单", Kind: "booklist"},
+	}, nil, nil)
+
+	resp := discoveryTestGet(t, service, RoutePrefix+"/api/discovery/catalog?kind=booklist&sites=rank-a")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload discoveryCatalogResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode catalog response: %v", err)
+	}
+	if len(payload.Sites) != 1 || len(payload.Sites[0].Lists) != 1 {
+		t.Fatalf("expected one booklist, got %+v", payload.Sites)
+	}
+	if payload.Sites[0].Lists[0].ID != "curated" {
+		t.Fatalf("unexpected filtered list: %+v", payload.Sites[0].Lists)
+	}
+}
+
+func TestDiscoveryListReturnsSelectedBooks(t *testing.T) {
+	service := newTestService()
+	registerFakeDiscoverySite(service, "rank-a", "榜单 A", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Description: "当前热门作品", Kind: "ranking"},
+	}, map[string][]model.SearchResult{
+		"hot": {
+			{Site: "rank-a", BookID: "1", Title: "第一本"},
+			{Site: "rank-a", BookID: "2", Title: "第二本"},
+		},
+	}, nil)
+
+	resp := discoveryTestGet(t, service, RoutePrefix+"/api/discovery/list?site=rank-a&id=hot&limit=2")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload discoveryListResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if payload.Site != "rank-a" || payload.Name != "榜单 A" || payload.List.ID != "hot" {
+		t.Fatalf("unexpected list metadata: %+v", payload)
+	}
+	if len(payload.Books) != 2 || payload.Books[0].BookID != "1" || payload.Books[1].BookID != "2" {
+		t.Fatalf("unexpected list books: %+v", payload.Books)
+	}
+}
+
+func TestDiscoveryListNotFound(t *testing.T) {
+	service := newTestService()
+	registerFakeDiscoverySite(service, "rank-a", "榜单 A", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Kind: "ranking"},
+	}, nil, nil)
+
+	resp := discoveryTestGet(t, service, RoutePrefix+"/api/discovery/list?site=rank-a&id=missing")
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestDiscoveryTrendingInterleavesSites(t *testing.T) {
+	service := newTestService()
+	registerFakeDiscoverySite(service, "rank-a", "榜单 A", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Kind: "ranking"},
+	}, map[string][]model.SearchResult{
+		"hot": {
+			{Site: "rank-a", BookID: "a1", Title: "A1"},
+			{Site: "rank-a", BookID: "a2", Title: "A2"},
+		},
+	}, nil)
+	registerFakeDiscoverySite(service, "rank-b", "榜单 B", []site.DiscoveryList{
+		{ID: "hot", Name: "热门榜", Kind: "ranking"},
+	}, map[string][]model.SearchResult{
+		"hot": {
+			{Site: "rank-b", BookID: "b1", Title: "B1"},
+			{Site: "rank-b", BookID: "b2", Title: "B2"},
+		},
+	}, nil)
+
+	resp := discoveryTestGet(t, service, RoutePrefix+"/api/discovery/trending?sites=rank-a,rank-b&limit=4")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload discoveryTrendingResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode trending response: %v", err)
+	}
+	got := make([]string, 0, len(payload.Books))
+	for _, item := range payload.Books {
+		got = append(got, item.BookID)
+	}
+	want := []string{"a1", "b1", "a2", "b2"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected interleaved books %v, got %v", want, got)
+	}
+}
+
+func TestIndexPageIncludesDiscoveryControls(t *testing.T) {
+	service := newTestService()
+	resp := discoveryTestGet(t, service, RoutePrefix+"/")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.Code)
+	}
+	body := resp.Body.String()
+	for _, needle := range []string{
+		`id="discoverTabButton"`,
+		`id="discoverTabPanel"`,
+		`id="discoverTrendingPanel"`,
+		`id="discoverCatalogPanel"`,
+		`id="discoverListPanel"`,
+	} {
+		if !strings.Contains(body, needle) {
+			t.Fatalf("expected index page to contain %s", needle)
+		}
+	}
+}

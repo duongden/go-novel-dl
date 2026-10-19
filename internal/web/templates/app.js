@@ -61,6 +61,22 @@ const initialSearchSourceState = loadSearchSourceState();
 const appState = {
   activeTab: "search",
   activeSubTab: "bookshelf",
+  discover: {
+    section: "trending",
+    activeSite: "",
+    catalog: [],
+    catalogLoaded: false,
+    catalogLoading: false,
+    catalogNotice: "",
+    warnings: [],
+    trendingBooks: [],
+    trendingLoaded: false,
+    trendingLoading: false,
+    activeList: null,
+    activeBooks: [],
+    listLoading: false,
+    requestToken: 0,
+  },
   page: 1,
   pageSize: initialPageSize,
   lastKeyword: "",
@@ -135,7 +151,7 @@ const appState = {
 let appURLSyncTimer = 0;
 let appURLRestoring = false;
 const APP_URL_KEYS = [
-  "view", "q", "mode", "page", "sites", "tags",
+  "view", "q", "mode", "page", "sites", "tags", "section", "list",
   "tag_search",
   "site", "book_id", "chapter_id", "chapter_url", "chapter_index",
   "chapter_page", "chapter_size", "local", "title", "folder", "panel",
@@ -544,6 +560,7 @@ const clearTagFiltersButton = document.getElementById("clearTagFilters");
 const tasksNode = document.getElementById("tasks");
 const tasksClearFinishedButton = document.getElementById("tasksClearFinished");
 const searchTabButton = document.getElementById("searchTabButton");
+const discoverTabButton = document.getElementById("discoverTabButton");
 const favoritesTabButton = document.getElementById("favoritesTabButton");
 const bookshelfSubTab = document.getElementById("bookshelfSubTab");
 const historySubTab = document.getElementById("historySubTab");
@@ -554,7 +571,25 @@ const tasksSubPanel = document.getElementById("tasksSubPanel");
 const bookshelfTabCountNode = document.getElementById("bookshelfTabCount");
 const historyTabCountNode = document.getElementById("historyTabCount");
 const searchTabPanel = document.getElementById("searchTabPanel");
+const discoverTabPanel = document.getElementById("discoverTabPanel");
 const favoritesTabPanel = document.getElementById("favoritesTabPanel");
+const discoverSectionTabs = Array.from(document.querySelectorAll("[data-discover-section]"));
+const discoverWarningsNode = document.getElementById("discoverWarnings");
+const discoverTrendingPanel = document.getElementById("discoverTrendingPanel");
+const discoverTrendingStatusNode = document.getElementById("discoverTrendingStatus");
+const discoverTrendingGridNode = document.getElementById("discoverTrendingGrid");
+const discoverTrendingCountNode = document.getElementById("discoverTrendingCount");
+const discoverCatalogPanel = document.getElementById("discoverCatalogPanel");
+const discoverCatalogTitleNode = document.getElementById("discoverCatalogTitle");
+const discoverCatalogHintNode = document.getElementById("discoverCatalogHint");
+const discoverSiteTabsNode = document.getElementById("discoverSiteTabs");
+const discoverStatusNode = document.getElementById("discoverStatus");
+const discoverListGridNode = document.getElementById("discoverListGrid");
+const discoverListPanel = document.getElementById("discoverListPanel");
+const discoverBackButton = document.getElementById("discoverBackButton");
+const discoverListHeaderNode = document.getElementById("discoverListHeader");
+const discoverBookStatusNode = document.getElementById("discoverBookStatus");
+const discoverBookGridNode = document.getElementById("discoverBookGrid");
 const historyListNode = document.getElementById("historyList");
 const historyStatusNode = document.getElementById("historyStatus");
 const historyRefreshButton = document.getElementById("historyRefresh");
@@ -672,6 +707,7 @@ function bootstrap() {
   renderTasks();
   renderPaging();
   renderResultMeta();
+  renderDiscover();
   setStatus("选择渠道后输入关键词开始搜索。");
 
   // 绑定滑动条联动显示
@@ -685,7 +721,12 @@ function bootstrap() {
   });
 
   searchTabButton.addEventListener("click", () => activateTab("search"));
+  if (discoverTabButton) discoverTabButton.addEventListener("click", () => activateTab("discover"));
   if (favoritesTabButton) favoritesTabButton.addEventListener("click", () => activateTab("favorites"));
+  discoverSectionTabs.forEach((tab) => {
+    tab.addEventListener("click", () => activateDiscoverSection(tab.dataset.discoverSection));
+  });
+  if (discoverBackButton) discoverBackButton.addEventListener("click", closeDiscoverList);
   if (bookshelfSubTab) bookshelfSubTab.addEventListener("click", () => activateSubTab("bookshelf"));
   if (historySubTab) historySubTab.addEventListener("click", () => activateSubTab("history"));
   if (tasksSubTab) tasksSubTab.addEventListener("click", () => activateSubTab("tasks"));
@@ -854,12 +895,20 @@ function bootstrap() {
 }
 
 function activateTab(tabName, options = {}) {
-  if (tabName !== "search" && tabName !== "favorites") tabName = "search";
+  if (!["search", "discover", "favorites"].includes(tabName)) tabName = "search";
   appState.activeTab = tabName;
   searchTabButton.classList.toggle("is-active", tabName === "search");
+  if (discoverTabButton) discoverTabButton.classList.toggle("is-active", tabName === "discover");
   if (favoritesTabButton) favoritesTabButton.classList.toggle("is-active", tabName === "favorites");
   searchTabPanel.classList.toggle("is-active", tabName === "search");
+  if (discoverTabPanel) discoverTabPanel.classList.toggle("is-active", tabName === "discover");
   if (favoritesTabPanel) favoritesTabPanel.classList.toggle("is-active", tabName === "favorites");
+  if (tabName === "discover" && options.load !== false) {
+    activateDiscoverSection(appState.discover.section || "trending", {
+      syncURL: false,
+      preserveList: true,
+    });
+  }
   if (tabName === "favorites") {
     activateSubTab(appState.activeSubTab || "bookshelf", options);
   }
@@ -1743,6 +1792,466 @@ function temporaryWarningSummary(warnings) {
   return `${rest}临时不可用，已显示其它可用渠道结果`;
 }
 
+function normalizeDiscoverSection(value) {
+  return ["trending", "ranking", "booklist"].includes(value) ? value : "trending";
+}
+
+function activateDiscoverSection(section, options = {}) {
+  section = normalizeDiscoverSection(section);
+  const discover = appState.discover;
+  discover.section = section;
+  if (!options.preserveList) {
+    discover.activeList = null;
+    discover.activeBooks = [];
+    discover.listError = "";
+  }
+
+  discoverSectionTabs.forEach((tab) => {
+    const active = tab.dataset.discoverSection === section;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+
+  if (options.activateTab !== false && appState.activeTab !== "discover") {
+    activateTab("discover", { load: false, syncURL: false });
+  }
+  renderDiscover();
+
+  if (section === "trending") {
+    void ensureDiscoverTrending();
+  } else {
+    void ensureDiscoverCatalog().then(() => renderDiscoverCatalog()).catch(() => {});
+  }
+  if (options.syncURL !== false) scheduleAppURLSync();
+}
+
+async function ensureDiscoverCatalog() {
+  const discover = appState.discover;
+  if (discover.catalogLoaded) return;
+  if (discover.catalogPromise) return discover.catalogPromise;
+  discover.catalogLoading = true;
+  discover.catalogNotice = "";
+  renderDiscoverCatalog();
+  discover.catalogPromise = (async () => {
+    try {
+      const payload = await fetchJSONWithTimeout(
+        `${window.location.origin}${root}/api/discovery/catalog`,
+        {},
+        20000,
+        "发现页渠道加载超时，请稍后重试。",
+      );
+      discover.catalog = Array.isArray(payload.sites) ? payload.sites : [];
+      setDiscoverWarnings("catalog", Array.isArray(payload.warnings) ? payload.warnings : []);
+      discover.catalogLoaded = true;
+      if (!discover.activeSite || !discover.catalog.some((item) => item.site === discover.activeSite)) {
+        discover.activeSite = discover.catalog[0] ? discover.catalog[0].site : "";
+      }
+    } catch (error) {
+      discover.catalogNotice = compactDiscoveryError(error);
+      setDiscoverWarnings("catalog", []);
+    } finally {
+      discover.catalogLoading = false;
+      discover.catalogPromise = null;
+      renderDiscoverCatalog();
+      scheduleAppURLSync();
+    }
+  })();
+  return discover.catalogPromise;
+}
+
+async function ensureDiscoverTrending() {
+  const discover = appState.discover;
+  if (discover.trendingLoaded) return;
+  if (discover.trendingPromise) return discover.trendingPromise;
+  discover.trendingLoading = true;
+  discover.trendingNotice = "";
+  renderDiscoverTrending();
+  discover.trendingPromise = (async () => {
+    try {
+      const payload = await fetchJSONWithTimeout(
+        `${window.location.origin}${root}/api/discovery/trending?limit=12`,
+        {},
+        30000,
+        "正在读榜单加载超时，请稍后重试。",
+      );
+      discover.trendingBooks = Array.isArray(payload.books) ? payload.books : [];
+      discover.trendingLoaded = true;
+      setDiscoverWarnings("trending", Array.isArray(payload.warnings) ? payload.warnings : []);
+    } catch (error) {
+      discover.trendingNotice = compactDiscoveryError(error);
+      setDiscoverWarnings("trending", []);
+    } finally {
+      discover.trendingLoading = false;
+      discover.trendingPromise = null;
+      renderDiscoverTrending();
+    }
+  })();
+  return discover.trendingPromise;
+}
+
+function renderDiscover() {
+  if (!discoverTabPanel) return;
+  const discover = appState.discover;
+  const listMode = Boolean(discover.activeList);
+  discoverSectionTabs.forEach((tab) => {
+    const active = tab.dataset.discoverSection === discover.section;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  if (discoverTrendingPanel) discoverTrendingPanel.hidden = listMode || discover.section !== "trending";
+  if (discoverCatalogPanel) discoverCatalogPanel.hidden = listMode || discover.section === "trending";
+  if (discoverListPanel) discoverListPanel.hidden = !listMode;
+  renderDiscoverWarnings();
+  if (listMode) {
+    renderDiscoverList();
+  } else if (discover.section === "trending") {
+    renderDiscoverTrending();
+  } else {
+    renderDiscoverCatalog();
+  }
+}
+
+function renderDiscoverTrending() {
+  const discover = appState.discover;
+  if (!discoverTrendingGridNode || !discoverTrendingStatusNode) return;
+  discoverTrendingGridNode.innerHTML = "";
+  discoverTrendingCountNode.textContent = String(discover.trendingBooks.length);
+  if (discover.trendingLoading) {
+    setDiscoverStatus(discoverTrendingStatusNode, "正在汇总各渠道热读作品…", true);
+  } else if (discover.trendingNotice) {
+    setDiscoverStatus(discoverTrendingStatusNode, discover.trendingNotice, true, "error");
+  } else if (!discover.trendingBooks.length) {
+    setDiscoverStatus(discoverTrendingStatusNode, "暂时没有可展示的热读作品。", true);
+  } else {
+    setDiscoverStatus(discoverTrendingStatusNode, "", false);
+  }
+  discover.trendingBooks.forEach((book, index) => {
+    discoverTrendingGridNode.appendChild(createDiscoveryBookCard(book, index));
+  });
+}
+
+function renderDiscoverCatalog() {
+  const discover = appState.discover;
+  if (!discoverCatalogPanel || discoverCatalogPanel.hidden) return;
+  const booklistMode = discover.section === "booklist";
+  discoverCatalogTitleNode.textContent = booklistMode ? "书单推荐" : "排行榜";
+  discoverCatalogHintNode.textContent = booklistMode
+    ? "只展示渠道公开维护的真实书单，不拼接或伪造内容。"
+    : "选择渠道，再进入榜单查看当前热门作品。";
+
+  const sites = discover.catalog.filter((source) => (
+    Array.isArray(source.lists) && source.lists.some((list) => list.kind === (booklistMode ? "booklist" : "ranking"))
+  ));
+  if (discover.catalogLoading) {
+    setDiscoverStatus(discoverStatusNode, "正在读取渠道榜单…", true);
+  } else if (discover.catalogNotice) {
+    setDiscoverStatus(discoverStatusNode, discover.catalogNotice, true, "error");
+  } else if (!sites.length) {
+    setDiscoverStatus(discoverStatusNode, booklistMode ? "当前渠道暂未公开书单。" : "当前没有可用的榜单渠道。", true);
+  } else {
+    setDiscoverStatus(discoverStatusNode, "", false);
+  }
+
+  if (!sites.some((source) => source.site === discover.activeSite)) {
+    discover.activeSite = sites[0] ? sites[0].site : "";
+  }
+  discoverSiteTabsNode.innerHTML = "";
+  discoverSiteTabsNode.hidden = !sites.length;
+  sites.forEach((source) => {
+    const listCount = source.lists.filter((list) => list.kind === (booklistMode ? "booklist" : "ranking")).length;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "discover-site-tab";
+    button.classList.toggle("is-active", source.site === discover.activeSite);
+    button.setAttribute("aria-pressed", String(source.site === discover.activeSite));
+    const name = document.createElement("span");
+    name.className = "discover-site-tab-name";
+    name.textContent = source.name || sourceLabel(source.site);
+    const count = document.createElement("span");
+    count.className = "discover-site-tab-count";
+    count.textContent = String(listCount);
+    button.append(name, count);
+    button.addEventListener("click", () => {
+      discover.activeSite = source.site;
+      renderDiscoverCatalog();
+      scheduleAppURLSync();
+    });
+    discoverSiteTabsNode.appendChild(button);
+  });
+
+  discoverListGridNode.innerHTML = "";
+  const activeSource = sites.find((source) => source.site === discover.activeSite);
+  const lists = activeSource
+    ? activeSource.lists.filter((list) => list.kind === (booklistMode ? "booklist" : "ranking"))
+    : [];
+  lists.forEach((list, index) => {
+    discoverListGridNode.appendChild(createDiscoverListCard(activeSource, list, index));
+  });
+}
+
+function createDiscoverListCard(source, list, index) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "discover-list-card";
+  button.dataset.accent = String(index % 4);
+  button.setAttribute("aria-label", `查看${source.name || sourceLabel(source.site)}${list.name}`);
+
+  const cover = createDiscoverCover(list, source, index);
+  const body = document.createElement("span");
+  body.className = "discover-list-card-body";
+  const title = document.createElement("strong");
+  title.className = "discover-list-card-title";
+  title.textContent = list.name || "未命名榜单";
+  const description = document.createElement("span");
+  description.className = "discover-list-card-description";
+  description.textContent = list.description || "查看原站公开内容";
+  const meta = document.createElement("span");
+  meta.className = "discover-list-card-meta";
+  meta.textContent = [list.update_frequency, list.book_count ? `${list.book_count} 本` : ""].filter(Boolean).join(" · ") || "原站实时内容";
+  body.append(title, description, meta);
+  button.append(cover, body);
+  button.addEventListener("click", () => void openDiscoverList(source.site, list));
+  return button;
+}
+
+function createDiscoverCover(list, source, index) {
+  const cover = document.createElement("span");
+  cover.className = "discover-list-cover";
+  cover.dataset.accent = String(index % 4);
+  if (list.cover_url) {
+    const image = document.createElement("img");
+    image.src = list.cover_url;
+    image.alt = list.name || "书单封面";
+    image.loading = "lazy";
+    image.addEventListener("error", () => image.remove());
+    cover.appendChild(image);
+  }
+  const glyph = document.createElement("span");
+  glyph.className = "discover-list-glyph";
+  glyph.textContent = list.kind === "booklist" ? "单" : "榜";
+  const sequence = document.createElement("span");
+  sequence.className = "discover-list-sequence";
+  sequence.textContent = String(index + 1).padStart(2, "0");
+  const sourceBadge = document.createElement("span");
+  sourceBadge.className = "discover-list-source";
+  sourceBadge.textContent = source.name || sourceLabel(source.site);
+  cover.append(glyph, sequence, sourceBadge);
+  return cover;
+}
+
+async function openDiscoverList(siteKey, list) {
+  const discover = appState.discover;
+  const token = ++discover.requestToken;
+  discover.activeSite = siteKey;
+  discover.activeList = {
+    ...list,
+    site: siteKey,
+    site_name: sourceLabel(siteKey),
+  };
+  discover.activeBooks = [];
+  discover.listLoading = true;
+  discover.listError = "";
+  renderDiscover();
+  scheduleAppURLSync();
+
+  try {
+    const url = new URL(`${window.location.origin}${root}/api/discovery/list`);
+    url.searchParams.set("site", siteKey);
+    url.searchParams.set("id", list.id);
+    url.searchParams.set("limit", "30");
+    const payload = await fetchJSONWithTimeout(
+      url.toString(),
+      {},
+      35000,
+      `${sourceLabel(siteKey)}榜单加载超时，请稍后重试。`,
+    );
+    if (token !== discover.requestToken) return;
+    discover.activeList = {
+      ...(payload.list || list),
+      site: siteKey,
+      site_name: payload.name || sourceLabel(siteKey),
+    };
+    discover.activeBooks = Array.isArray(payload.books) ? payload.books : [];
+  } catch (error) {
+    if (token !== discover.requestToken) return;
+    discover.listError = compactDiscoveryError(error);
+  } finally {
+    if (token !== discover.requestToken) return;
+    discover.listLoading = false;
+    renderDiscoverList();
+  }
+}
+
+function closeDiscoverList(options = {}) {
+  const discover = appState.discover;
+  discover.requestToken += 1;
+  discover.activeList = null;
+  discover.activeBooks = [];
+  discover.listLoading = false;
+  discover.listError = "";
+  renderDiscover();
+  if (options.syncURL !== false) scheduleAppURLSync();
+}
+
+function renderDiscoverList() {
+  const discover = appState.discover;
+  if (!discoverListHeaderNode || !discoverBookGridNode || !discoverBookStatusNode) return;
+  const list = discover.activeList;
+  if (!list) return;
+
+  discoverListHeaderNode.innerHTML = "";
+  const cover = createDiscoverCover(list, {
+    site: list.site,
+    name: list.site_name || sourceLabel(list.site),
+  }, 0);
+  cover.classList.add("discover-list-header-cover");
+  const copy = document.createElement("div");
+  copy.className = "discover-list-header-copy";
+  const source = document.createElement("span");
+  source.className = "discover-eyebrow";
+  source.textContent = `${list.site_name || sourceLabel(list.site)} · ${list.kind === "booklist" ? "BOOKLIST" : "RANKING"}`;
+  const title = document.createElement("h2");
+  title.textContent = list.name || "榜单详情";
+  const description = document.createElement("p");
+  description.textContent = list.description || "以下内容直接来自原站公开页面。";
+  const meta = document.createElement("div");
+  meta.className = "discover-list-header-meta";
+  [list.update_frequency, discover.activeBooks.length ? `${discover.activeBooks.length} 本` : ""]
+    .filter(Boolean)
+    .forEach((text) => {
+      const chip = document.createElement("span");
+      chip.textContent = text;
+      meta.appendChild(chip);
+    });
+  copy.append(source, title, description, meta);
+  discoverListHeaderNode.append(cover, copy);
+
+  discoverBookGridNode.innerHTML = "";
+  discover.activeBooks.forEach((book, index) => {
+    discoverBookGridNode.appendChild(createDiscoveryBookCard(book, index));
+  });
+  if (discover.listLoading) {
+    setDiscoverStatus(discoverBookStatusNode, "正在加载完整榜单…", true);
+  } else if (discover.listError) {
+    setDiscoverStatus(discoverBookStatusNode, discover.listError, true, "error");
+  } else if (!discover.activeBooks.length) {
+    setDiscoverStatus(discoverBookStatusNode, "这个榜单暂时没有可展示的作品。", true);
+  } else {
+    setDiscoverStatus(discoverBookStatusNode, "", false);
+  }
+}
+
+function createDiscoveryBookCard(book, index = 0) {
+  const result = {
+    title: book.title || "",
+    author: book.author || "",
+    cover_url: book.cover_url || "",
+    description: book.description || "",
+    latest_chapter: book.latest_chapter || "",
+    url: book.url || "",
+    primary: book,
+    variants: [book],
+    sources: [book],
+    source_count: 1,
+  };
+  const card = document.createElement("article");
+  card.className = "result-card is-clickable discover-book-card";
+  card.dataset.rank = String(index + 1);
+  card.setAttribute("tabindex", "0");
+  card.setAttribute("aria-label", `查看${book.title || "未命名小说"}的详情`);
+  const open = () => openDetail(result, book);
+  card.addEventListener("click", open);
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      open();
+    }
+  });
+
+  const coverButton = document.createElement("button");
+  coverButton.type = "button";
+  coverButton.className = "result-cover-button";
+  coverButton.setAttribute("aria-label", `查看${book.title || "未命名小说"}的详情`);
+  coverButton.appendChild(createCoverImage(book.cover_url, book.title, "result-cover"));
+  const rank = document.createElement("span");
+  rank.className = "discover-rank-badge";
+  rank.textContent = String(index + 1);
+  coverButton.appendChild(rank);
+
+  const body = document.createElement("div");
+  body.className = "result-body";
+  const title = document.createElement("h3");
+  title.className = "result-title";
+  title.textContent = book.title || book.book_id || "未命名小说";
+  const author = document.createElement("p");
+  author.className = "result-author";
+  author.textContent = `作者：${book.author || "未知作者"}`;
+  const source = document.createElement("p");
+  source.className = "result-source";
+  source.textContent = `来源：${sourceLabel(book.site)}`;
+  body.append(title, author, source);
+  if (book.description) {
+    const description = document.createElement("p");
+    description.className = "discover-book-description";
+    description.textContent = book.description;
+    body.appendChild(description);
+  }
+  if (book.latest_chapter) {
+    const extra = document.createElement("p");
+    extra.className = "result-extra";
+    extra.textContent = `最新：${book.latest_chapter}`;
+    body.appendChild(extra);
+  }
+  card.append(coverButton, body);
+  return card;
+}
+
+function setDiscoverStatus(node, text, visible, tone = "") {
+  if (!node) return;
+  node.hidden = !visible;
+  node.textContent = visible ? text : "";
+  if (tone) node.dataset.tone = tone;
+  else delete node.dataset.tone;
+}
+
+function setDiscoverWarnings(scope, warnings) {
+  const discover = appState.discover;
+  if (!discover.warningScopes) discover.warningScopes = {};
+  discover.warningScopes[scope] = Array.isArray(warnings) ? warnings : [];
+  discover.warnings = Object.values(discover.warningScopes).flat();
+  renderDiscoverWarnings();
+}
+
+function renderDiscoverWarnings() {
+  if (!discoverWarningsNode) return;
+  discoverWarningsNode.innerHTML = "";
+  const seen = new Set();
+  const warnings = (appState.discover.warnings || []).filter((warning) => {
+    const key = `${warning.site || ""}:${warning.error || warning.message || ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  discoverWarningsNode.hidden = warnings.length === 0;
+  warnings.forEach((warning) => {
+    const item = document.createElement("div");
+    item.className = "discover-warning";
+    const site = document.createElement("strong");
+    site.textContent = sourceLabel(warning.site);
+    const message = document.createElement("span");
+    message.textContent = compactDiscoveryError(warning.error || warning.message || "暂时不可用");
+    item.append(site, message);
+    discoverWarningsNode.appendChild(item);
+  });
+}
+
+function compactDiscoveryError(error) {
+  const text = String((error && (error.message || error.error)) || error || "请求失败")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+}
+
 function renderResults(results) {
   resultsNode.innerHTML = "";
   if (!results.length) return resultsNode.appendChild(createEmptyState("当前页没有可展示的结果。"));
@@ -2484,7 +2993,7 @@ let readerContentCachePersistTimer = 0;
 function readAppURLState() {
   const params = new URLSearchParams(window.location.search);
   let view = String(params.get("view") || "").trim().toLowerCase();
-  if (!["search", "favorites", "bookshelf", "history", "tasks", "detail", "reader", "settings"].includes(view)) {
+  if (!["search", "discover", "favorites", "bookshelf", "history", "tasks", "detail", "reader", "settings"].includes(view)) {
     if (params.get("chapter_id") || params.get("chapter_url")) view = "reader";
     else if (params.get("book_id")) view = "detail";
     else if (params.get("q")) view = "search";
@@ -2544,6 +3053,17 @@ function syncAppURL() {
       chapter_page: appState.activeDetailPage || 1,
       chapter_size: appState.activeDetailPageSize || normalizedChapterPageSize(),
       local: detailVariant.local ? "1" : "",
+    });
+    return;
+  }
+
+  if (appState.activeTab === "discover") {
+    const discover = appState.discover;
+    setAppURLState({
+      view: "discover",
+      section: discover.section || "trending",
+      site: discover.activeSite,
+      list: discover.activeList ? discover.activeList.id : "",
     });
     return;
   }
@@ -2658,6 +3178,34 @@ async function restoreFavoritesFromURL(view, params) {
   }
 }
 
+async function restoreDiscoverFromURL(params) {
+  const section = normalizeDiscoverSection(String(params.get("section") || "trending"));
+  activateTab("discover", { load: false, syncURL: false });
+  activateDiscoverSection(section, {
+    activateTab: false,
+    preserveList: false,
+    syncURL: false,
+  });
+  if (section === "trending") {
+    await ensureDiscoverTrending();
+    return;
+  }
+
+  await ensureDiscoverCatalog();
+  const requestedSite = String(params.get("site") || "").trim();
+  if (requestedSite && appState.discover.catalog.some((item) => item.site === requestedSite)) {
+    appState.discover.activeSite = requestedSite;
+  }
+  renderDiscoverCatalog();
+
+  const listID = String(params.get("list") || "").trim();
+  if (!listID) return;
+  const source = appState.discover.catalog.find((item) => item.site === appState.discover.activeSite);
+  const list = source && source.lists.find((item) => item.id === listID && item.kind === section);
+  if (!list) throw new Error("URL 中的榜单不存在或已下线");
+  await openDiscoverList(source.site, list);
+}
+
 async function restoreDetailFromURL(params) {
   const variant = urlVariant(params);
   if (!variant) throw new Error("详情链接缺少 site 或 book_id");
@@ -2706,6 +3254,8 @@ async function restoreAppFromLocation() {
   try {
     if (view === "search") {
       await restoreSearchFromURL(params);
+    } else if (view === "discover") {
+      await restoreDiscoverFromURL(params);
     } else if (["favorites", "bookshelf", "history", "tasks"].includes(view)) {
       await restoreFavoritesFromURL(view, params);
     } else if (view === "detail") {
