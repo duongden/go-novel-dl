@@ -233,6 +233,56 @@ func (s *FalooSite) Search(ctx context.Context, keyword string, limit int) ([]mo
 	return results, nil
 }
 
+// SearchTag resolves a Chinese tag label through Faloo's Tag_Index page and
+// then reads the native tag result page. Faloo uses numeric tag IDs, so using
+// the label directly as a keyword would be a different search.
+func (s *FalooSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	tagURL, err := s.resolveTagURL(ctx, tag)
+	if err != nil {
+		return nil, err
+	}
+	markup, err := s.fetchPage(ctx, tagURL)
+	if err != nil {
+		return nil, err
+	}
+	return parseFalooTagResults(markup, limit)
+}
+
+func (s *FalooSite) resolveTagURL(ctx context.Context, tag string) (string, error) {
+	markup, err := s.fetchPage(ctx, "https://b.faloo.com/Tag_Index.html")
+	if err != nil {
+		return "", err
+	}
+	return parseFalooTagIndexURL(markup, tag)
+}
+
+func parseFalooTagIndexURL(markup, tag string) (string, error) {
+	doc, err := parseHTML(markup)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range findAll(doc, func(n *html.Node) bool {
+		return n.Type == html.ElementNode && n.Data == "a" && hasClass(n, "c_de_data1") && strings.HasPrefix(strings.TrimSpace(attrValue(n, "href")), "//b.faloo.com/tag_")
+	}) {
+		label := strings.TrimSpace(attrValue(a, "title"))
+		if label == "" {
+			label = cleanText(nodeText(a))
+		}
+		if !strings.EqualFold(label, tag) {
+			continue
+		}
+		return absolutizeURL("https://b.faloo.com", attrValue(a, "href")), nil
+	}
+	return "", fmt.Errorf("faloo native tag %q not found", tag)
+}
+
 func (s *FalooSite) extractFalooMainChapters(main *html.Node) []model.Chapter {
 	chapters := make([]model.Chapter, 0)
 	inVIPSection := false
@@ -381,6 +431,63 @@ func parseFalooSearchResults(markup string) ([]model.SearchResult, string, error
 		}
 	}
 	return results, nextPath, nil
+}
+
+func parseFalooTagResults(markup string, limit int) ([]model.SearchResult, error) {
+	doc, err := parseHTML(markup)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]model.SearchResult, 0, limit)
+	seen := map[string]struct{}{}
+	for _, item := range findAll(doc, func(n *html.Node) bool {
+		return n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "c_c_d_data")
+	}) {
+		titleLink := findFirst(item, func(n *html.Node) bool {
+			return n.Type == html.ElementNode && n.Data == "a" && hasAncestorClass(n, "c_c_d_da_left1")
+		})
+		bookID := falooPath(attrValue(titleLink, "href"))
+		match := falooBookRe.FindStringSubmatch(bookID)
+		if len(match) != 2 {
+			continue
+		}
+		bookID = match[1]
+		if _, ok := seen[bookID]; ok {
+			continue
+		}
+		seen[bookID] = struct{}{}
+		title := strings.TrimSpace(attrValue(titleLink, "title"))
+		if title == "" {
+			title = cleanText(nodeText(titleLink))
+		}
+		if title == "" {
+			continue
+		}
+		coverNode := findFirst(item, func(n *html.Node) bool {
+			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "c_c_d_da_right")
+		})
+		coverURL := strings.TrimSpace(attrValue(coverNode, "data-original"))
+		if coverURL == "" {
+			coverURL = strings.TrimSpace(attrValue(coverNode, "src"))
+		}
+		results = append(results, model.SearchResult{
+			Site:   "faloo",
+			BookID: bookID,
+			Title:  title,
+			Description: cleanText(nodeTextPreserveLineBreaks(findFirst(item, func(n *html.Node) bool {
+				return n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "c_c_d_da_desc")
+			}))),
+			URL: fmt.Sprintf("https://b.faloo.com/%s.html", bookID),
+			LatestChapter: cleanText(nodeText(findFirst(item, func(n *html.Node) bool {
+				return n.Type == html.ElementNode && n.Data == "a" && hasAncestorClass(n, "c_c_d_da_title")
+			}))),
+			CoverURL: coverURL,
+		})
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }
 
 func falooTags(doc *html.Node) []string {

@@ -75,6 +75,23 @@ func TestParseBuguxsSearchResults(t *testing.T) {
 	}
 }
 
+func TestParseBuguxsTagIndexURL(t *testing.T) {
+	markup := `<div class="book-taglist">
+<a class="label label-info" href="/tags/ZhongSheng/" title="重生">重生</a>
+<a class="label label-default" href="/tags/ChuanYue/" title="穿越">穿越</a>
+</div>`
+	got, err := parseBuguxsTagIndexURL(markup, "重生")
+	if err != nil {
+		t.Fatalf("resolve tag index: %v", err)
+	}
+	if got != "https://www.buguxs.com/tags/ZhongSheng/" {
+		t.Fatalf("unexpected tag URL: %q", got)
+	}
+	if _, err := parseBuguxsTagIndexURL(markup, "不存在"); err == nil {
+		t.Fatalf("expected missing native tag to return an error")
+	}
+}
+
 func TestParseBuguxsChapterContent(t *testing.T) {
 	markup := `<html><body><div id="chaptercontent">
 <p>布谷小说网【buguxs.com】第一时间更新《某书》最新章节。</p>
@@ -99,9 +116,9 @@ func TestParseBuguxsChapterContent(t *testing.T) {
 
 func TestBuguxsCleanChapterTitle(t *testing.T) {
 	cases := map[string]string{
-		"第102章 丁天成":       "第102章 丁天成",
+		"第102章 丁天成":        "第102章 丁天成",
 		"第1章 动迁纷争 (第2/2页)": "第1章 动迁纷争",
-		"\ufeff第1章 开头":       "第1章 开头",
+		"\ufeff第1章 开头":     "第1章 开头",
 	}
 	for input, want := range cases {
 		if got := buguxsCleanChapterTitle(input); got != want {

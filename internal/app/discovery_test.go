@@ -104,6 +104,99 @@ func TestHybridSearchHonorsExplicitSites(t *testing.T) {
 	}
 }
 
+func TestHybridSearchUsesNativeTagSearchWithoutExactFiltering(t *testing.T) {
+	registry := site.NewRegistry()
+	registry.Register("alicesw", func(cfg config.ResolvedSiteConfig) site.Site {
+		return fakeTagSearchSite{
+			fakeSearchSite: fakeSearchSite{
+				key:         "alicesw",
+				displayName: "Alicesw",
+				results: []model.SearchResult{
+					{Site: "alicesw", BookID: "100", Title: "普通关键词结果"},
+				},
+			},
+			tagResults: []model.SearchResult{
+				{Site: "alicesw", BookID: "200", Title: "标题不含标签"},
+			},
+		}
+	})
+
+	runtime := newFakeRuntime(registry)
+	response, err := runtime.HybridSearch(context.Background(), "都市", HybridSearchOptions{
+		Sites: []string{"alicesw"},
+		Tag:   "都市",
+		Exact: true,
+	})
+	if err != nil {
+		t.Fatalf("HybridSearch returned error: %v", err)
+	}
+	if !response.TagSearch {
+		t.Fatalf("expected native tag search to be reported")
+	}
+	if len(response.Results) != 1 || response.Results[0].Primary.BookID != "200" {
+		t.Fatalf("expected native tag result, got %+v", response.Results)
+	}
+}
+
+func TestHybridSearchFallsBackWhenSiteHasNoNativeTagSearch(t *testing.T) {
+	registry := site.NewRegistry()
+	registry.Register("alicesw", func(cfg config.ResolvedSiteConfig) site.Site {
+		return fakeSearchSite{
+			key:         "alicesw",
+			displayName: "Alicesw",
+			results: []model.SearchResult{
+				{Site: "alicesw", BookID: "100", Title: "都市关键词结果"},
+			},
+		}
+	})
+
+	runtime := newFakeRuntime(registry)
+	response, err := runtime.HybridSearch(context.Background(), "都市", HybridSearchOptions{
+		Sites: []string{"alicesw"},
+		Tag:   "都市",
+	})
+	if err != nil {
+		t.Fatalf("HybridSearch returned error: %v", err)
+	}
+	if response.TagSearch {
+		t.Fatalf("did not expect native tag search for fallback site")
+	}
+	if len(response.Results) != 1 || response.Results[0].Primary.BookID != "100" {
+		t.Fatalf("expected keyword fallback result, got %+v", response.Results)
+	}
+}
+
+func TestHybridSearchFallsBackWhenNativeTagSearchFails(t *testing.T) {
+	registry := site.NewRegistry()
+	registry.Register("alicesw", func(cfg config.ResolvedSiteConfig) site.Site {
+		return fakeTagSearchSite{
+			fakeSearchSite: fakeSearchSite{
+				key:         "alicesw",
+				displayName: "Alicesw",
+				results: []model.SearchResult{
+					{Site: "alicesw", BookID: "100", Title: "都市关键词结果"},
+				},
+			},
+			tagErr: context.DeadlineExceeded,
+		}
+	})
+
+	runtime := newFakeRuntime(registry)
+	response, err := runtime.HybridSearch(context.Background(), "都市", HybridSearchOptions{
+		Sites: []string{"alicesw"},
+		Tag:   "都市",
+	})
+	if err != nil {
+		t.Fatalf("HybridSearch returned error: %v", err)
+	}
+	if response.TagSearch {
+		t.Fatalf("did not expect failed native tag search to be reported as used")
+	}
+	if len(response.Results) != 1 || response.Results[0].Primary.BookID != "100" {
+		t.Fatalf("expected keyword fallback result, got %+v", response.Results)
+	}
+}
+
 func TestHybridSearchExactFiltersResultsByKeyword(t *testing.T) {
 	registry := site.NewRegistry()
 	registry.Register("esjzone", func(cfg config.ResolvedSiteConfig) site.Site {
@@ -438,6 +531,23 @@ type fakeSearchSite struct {
 	err          error
 	delay        time.Duration
 	capabilities site.Capabilities
+}
+
+type fakeTagSearchSite struct {
+	fakeSearchSite
+	tagResults []model.SearchResult
+	tagErr     error
+}
+
+func (s fakeTagSearchSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	if s.tagErr != nil {
+		return nil, s.tagErr
+	}
+	items := append([]model.SearchResult(nil), s.tagResults...)
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
 }
 
 func (s fakeSearchSite) Key() string {

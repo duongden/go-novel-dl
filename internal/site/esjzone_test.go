@@ -153,6 +153,42 @@ func TestESJZoneSearchDoesNotRequireAuth(t *testing.T) {
 	}
 }
 
+func TestESJZoneSearchTagUsesNativeTagRoute(t *testing.T) {
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/tags/") {
+			requestedPath = r.URL.Path
+		}
+		_, _ = w.Write([]byte(`<html><body>
+			<div class="card">
+				<div class="lazyload" data-src="/cover.jpg"></div>
+				<div class="card-body">
+					<h5 class="card-title"><a href="/detail/7.html">标签书</a></h5>
+					<div class="card-author">作者：测试作者</div>
+				</div>
+			</div>
+		</body></html>`))
+	}))
+	defer server.Close()
+
+	cfg := config.DefaultConfig().ResolveSiteConfig("esjzone")
+	site := NewESJZoneSite(cfg)
+	site.searchAliases = []string{server.URL}
+	site.bookAliases = []string{server.URL}
+	site.primaryHost = server.URL
+
+	results, err := site.SearchTag(context.Background(), "奇幻", 5)
+	if err != nil {
+		t.Fatalf("search native tag: %v", err)
+	}
+	if requestedPath != "/tags/奇幻/" {
+		t.Fatalf("expected native tag route, got %q", requestedPath)
+	}
+	if len(results) != 1 || results[0].BookID != "7" || results[0].Title != "标签书" {
+		t.Fatalf("unexpected tag results: %+v", results)
+	}
+}
+
 func TestInjectCookieString(t *testing.T) {
 	cfg := config.DefaultConfig().ResolveSiteConfig("esjzone")
 	site := NewESJZoneSite(cfg)

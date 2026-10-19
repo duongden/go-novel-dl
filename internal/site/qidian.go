@@ -225,6 +225,28 @@ func (s *QidianSite) Search(ctx context.Context, keyword string, limit int) ([]m
 	return nil, nil
 }
 
+// SearchTag uses Qidian's mobile tag landing page. The page has the same
+// book-card links as mobile keyword search, so its result parser can be reused.
+func (s *QidianSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, nil
+	}
+	rawURL := "https://m.qidian.com/category/tags/" + url.PathEscape(tag) + "/"
+	markup, err := s.fetchQidianHTML(ctx, rawURL, qidianMobileHeaders("https://m.qidian.com/"))
+	if err != nil {
+		return nil, err
+	}
+	results, err := parseQidianSearchResults(markup)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
 func (s *QidianSite) populateSearchDetail(ctx context.Context, item *model.SearchResult) error {
 	if item == nil || strings.TrimSpace(item.BookID) == "" {
 		return nil

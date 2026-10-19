@@ -41,3 +41,41 @@ func TestParseFalooSearchResults(t *testing.T) {
 		t.Fatalf("unexpected faloo description/cover: %+v", results[0])
 	}
 }
+
+func TestParseFalooTagIndexAndResults(t *testing.T) {
+	indexMarkup := `<div class="c_detail" id="Tag1">
+		<a class="c_de_data1" title="爽文" href="//b.faloo.com/tag_3357.html">爽文<span>[378737本]</span></a>
+		<a class="c_de_data1" title="穿越" href="//b.faloo.com/tag_3476.html">穿越<span>[198056本]</span></a>
+	</div>`
+	tagURL, err := parseFalooTagIndexURL(indexMarkup, "穿越")
+	if err != nil {
+		t.Fatalf("resolve faloo tag: %v", err)
+	}
+	if tagURL != "https://b.faloo.com/tag_3476.html" {
+		t.Fatalf("unexpected faloo tag URL: %q", tagURL)
+	}
+
+	markup := `<html><body>
+	<div class="c_c_d_data">
+		<div class="c_c_d_da_left1"><a href="//b.faloo.com/1236995.html" title="穿越测试书">穿越测试书</a></div>
+		<div class="c_c_d_da_right"><img src="http://img.example/1236995.jpg"></div>
+		<div class="c_c_d_da_left3">
+			<div class="c_c_d_da_title"><a href="//b.faloo.com/1236995_2.html">第2章</a></div>
+			<div class="c_c_d_da_desc"><a href="//b.faloo.com/1236995.html">一段简介</a></div>
+		</div>
+	</div>
+	</body></html>`
+	results, err := parseFalooTagResults(markup, 10)
+	if err != nil {
+		t.Fatalf("parse faloo tag results: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one tag result, got %+v", results)
+	}
+	if results[0].BookID != "1236995" || results[0].Title != "穿越测试书" {
+		t.Fatalf("unexpected tag result: %+v", results[0])
+	}
+	if results[0].LatestChapter != "第2章" || results[0].Description != "一段简介" {
+		t.Fatalf("unexpected tag metadata: %+v", results[0])
+	}
+}

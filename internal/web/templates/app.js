@@ -65,6 +65,9 @@ const appState = {
   pageSize: initialPageSize,
   lastKeyword: "",
   lastExact: false,
+  lastSearchSites: [],
+  lastTagSearch: "",
+  lastTagSearchUsed: false,
   results: [],
   total: 0,
   totalExact: true,
@@ -133,6 +136,7 @@ let appURLSyncTimer = 0;
 let appURLRestoring = false;
 const APP_URL_KEYS = [
   "view", "q", "mode", "page", "sites", "tags",
+  "tag_search",
   "site", "book_id", "chapter_id", "chapter_url", "chapter_index",
   "chapter_page", "chapter_size", "local", "title", "folder", "panel",
 ];
@@ -792,7 +796,10 @@ function bootstrap() {
   searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     appState.page = 1;
-    await performSearch(searchModeSelect ? searchModeSelect.value === "exact" : false);
+    await performSearch(searchModeSelect ? searchModeSelect.value === "exact" : false, {
+      sites: Array.from(appState.selectedSites),
+      tag: "",
+    });
   });
 
   detailCloseButton.addEventListener("click", closeDetail);
@@ -878,30 +885,50 @@ function activateSubTab(subTabName, options = {}) {
   if (options.syncURL !== false) scheduleAppURLSync();
 }
 
-async function performSearch(exact = appState.lastExact) {
+async function performSearch(exact = appState.lastExact, options = {}) {
   const keyword = keywordInput.value.trim();
   if (!keyword) return setStatus("请输入关键词。");
-  if (appState.selectedSites.size === 0) return setStatus("请至少选择一个渠道。");
-  const useExact = Boolean(exact);
+  options = options && typeof options === "object" ? options : {};
+  const hasExplicitScope = Object.prototype.hasOwnProperty.call(options, "sites")
+    || Object.prototype.hasOwnProperty.call(options, "tag");
+  const requestedSites = (hasExplicitScope && Array.isArray(options.sites) ? options.sites : (
+    !hasExplicitScope && Array.isArray(appState.lastSearchSites) && appState.lastSearchSites.length
+      ? appState.lastSearchSites
+      : Array.from(appState.selectedSites)
+  )).filter((key) => sourceKeySet.has(key));
+  const searchSites = Array.from(new Set(requestedSites));
+  if (searchSites.length === 0) return setStatus("请至少选择一个渠道。");
+  const requestedTag = hasExplicitScope
+    ? String(options.tag || "").trim()
+    : String(appState.lastTagSearch || "").trim();
+  const tagSearch = searchSites.length === 1 ? requestedTag : "";
+  const useExact = tagSearch ? false : Boolean(exact);
   if (searchModeSelect) searchModeSelect.value = useExact ? "exact" : "fuzzy";
 
   closeDetail();
   setSearchPageSize((appState.generalConfig && appState.generalConfig.web_page_size) || appState.pageSize);
   appState.lastKeyword = keyword;
   appState.lastExact = useExact;
+  appState.lastSearchSites = searchSites.slice();
+  appState.lastTagSearch = tagSearch;
+  appState.lastTagSearchUsed = false;
   activateTab("search");
   scheduleAppURLSync();
   renderWarnings([]);
-  setStatus(`正在${useExact ? "精确搜索" : "模糊搜索"}“${keyword}”，第 ${appState.page} 页...`);
+  setStatus(tagSearch
+    ? `正在通过${sourceLabel(searchSites[0])}原站标签搜索“${tagSearch}”，第 ${appState.page} 页...`
+    : `正在${useExact ? "精确搜索" : "模糊搜索"}“${keyword}”，第 ${appState.page} 页...`);
 
   try {
+    const requestBody = {
+      keyword, scope: "all", sites: searchSites,
+      page: appState.page, page_size: appState.pageSize, exact: useExact,
+    };
+    if (tagSearch) requestBody.tag = tagSearch;
     const response = await fetch(`${root}/api/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        keyword, scope: "all", sites: Array.from(appState.selectedSites),
-        page: appState.page, page_size: appState.pageSize, exact: useExact,
-      }),
+      body: JSON.stringify(requestBody),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -917,6 +944,7 @@ async function performSearch(exact = appState.lastExact) {
     appState.hasNext = Boolean(payload.has_next);
     appState.page = payload.page || appState.page;
     appState.pageSize = Math.max(1, Number.parseInt(String(payload.page_size || appState.pageSize || defaultPageSize), 10) || defaultPageSize);
+    appState.lastTagSearchUsed = Boolean(tagSearch && payload.tag_search);
 
     const warnings = payload.warnings || [];
     renderResults(appState.results);
@@ -926,10 +954,16 @@ async function performSearch(exact = appState.lastExact) {
 
     if (!appState.results.length) {
       const suffix = warnings.length ? `；${temporaryWarningSummary(warnings)}` : "";
-      return setStatus(`没有${useExact ? "精确搜索" : "模糊搜索"}到“${keyword}”，可以换关键词、减少渠道标签筛选，或直接粘贴小说链接${suffix}。`, "empty");
+      const queryLabel = tagSearch ? `原站标签“${tagSearch}”` : `${useExact ? "精确搜索" : "模糊搜索"}“${keyword}”`;
+      return setStatus(`没有搜索到${queryLabel}，可以换关键词、减少渠道标签筛选，或直接粘贴小说链接${suffix}。`, "empty");
     }
     const warningSuffix = warnings.length ? `，${warnings.length} 个渠道临时跳过` : "";
-    setStatus(`当前显示第 ${appState.page} 页，共 ${totalLabel(appState.total, appState.totalExact)} 条结果${warningSuffix}。`);
+    const searchSuffix = tagSearch
+      ? (appState.lastTagSearchUsed
+        ? `，已使用 ${sourceLabel(searchSites[0])} 原站标签检索`
+        : `，${sourceLabel(searchSites[0])} 已回退为关键词检索`)
+      : "";
+    setStatus(`当前显示第 ${appState.page} 页，共 ${totalLabel(appState.total, appState.totalExact)} 条结果${searchSuffix}${warningSuffix}。`);
     warmupDetailCache(appState.results);
   } catch (error) {
     appState.results = []; appState.total = 0; appState.totalExact = true;
@@ -1871,6 +1905,15 @@ function normalizeDetailTags(value) {
   });
 }
 
+function searchDetailTag(tagText, sourceSite) {
+  const tag = String(tagText || "").trim();
+  if (!tag) return;
+  const sites = sourceKeySet.has(sourceSite) ? [sourceSite] : Array.from(appState.selectedSites);
+  keywordInput.value = tag;
+  appState.page = 1;
+  void performSearch(false, { sites, tag: sourceKeySet.has(sourceSite) ? tag : "" });
+}
+
 function renderDetail(result, variant, detail, loading, errorMessage) {
   detailContentNode.innerHTML = "";
   const activeVariant = variant || result.primary;
@@ -1931,13 +1974,9 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
       tagNode.type = "button";
       tagNode.className = "detail-book-tag";
       tagNode.textContent = tagText;
-      tagNode.title = `搜索标签：${tagText}`;
-      tagNode.setAttribute("aria-label", `搜索标签 ${tagText}`);
-      tagNode.addEventListener("click", () => {
-        keywordInput.value = tagText;
-        appState.page = 1;
-        void performSearch(false);
-      });
+      tagNode.title = `按原站标签搜索：${tagText}`;
+      tagNode.setAttribute("aria-label", `按原站标签搜索 ${tagText}`);
+      tagNode.addEventListener("click", () => searchDetailTag(tagText, activeVariant.site));
       tagsNode.appendChild(tagNode);
     });
     summary.appendChild(tagsNode);
@@ -2017,7 +2056,7 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
     if (!query) return setStatus("请输入要搜索的书名。");
     keywordInput.value = query;
     appState.page = 1;
-    void performSearch(false);
+    void performSearch(false, { sites: Array.from(appState.selectedSites), tag: "" });
   });
   summary.appendChild(actions);
   summary.appendChild(similarForm);
@@ -2528,8 +2567,11 @@ function syncAppURL() {
     searchState.q = appState.lastKeyword;
     searchState.mode = appState.lastExact ? "exact" : "fuzzy";
     searchState.page = appState.page || 1;
-    searchState.sites = Array.from(appState.selectedSites).join(",");
+    searchState.sites = (appState.lastSearchSites.length
+      ? appState.lastSearchSites
+      : Array.from(appState.selectedSites)).join(",");
     searchState.tags = Array.from(appState.selectedSourceTags).join(",");
+    if (appState.lastTagSearch) searchState.tag_search = "1";
   }
   setAppURLState(searchState);
 }
@@ -2583,13 +2625,17 @@ async function restoreSearchFromURL(params) {
   renderSourceSelector();
   keywordInput.value = keyword;
   const exact = params.get("mode") === "exact";
+  const tagSearch = params.get("tag_search") === "1" && siteKeys.length === 1;
   if (searchModeSelect) searchModeSelect.value = exact ? "exact" : "fuzzy";
   appState.page = urlPositiveInt(params, "page", 1);
   if (!keyword) {
     activateTab("search", { syncURL: false });
     return;
   }
-  await performSearch(exact);
+  await performSearch(exact, {
+    sites: siteKeys.length ? siteKeys : Array.from(appState.selectedSites),
+    tag: tagSearch ? keyword : "",
+  });
 }
 
 async function restoreFavoritesFromURL(view, params) {
@@ -3893,10 +3939,16 @@ function scrollToResultsTop() {
 
 function renderResultMeta() {
   if (!appState.lastKeyword) return resultMetaNode.textContent = "输入关键词后开始搜索。";
-  if (!appState.results.length) return resultMetaNode.textContent = `关键词“${appState.lastKeyword}”暂无结果。`;
+  const queryLabel = appState.lastTagSearch
+    ? `原站标签“${appState.lastTagSearch}”`
+    : `关键词“${appState.lastKeyword}”`;
+  const modeLabel = appState.lastTagSearch
+    ? (appState.lastTagSearchUsed ? " · 原站标签检索" : " · 关键词回退")
+    : "";
+  if (!appState.results.length) return resultMetaNode.textContent = `${queryLabel}暂无结果${modeLabel}。`;
   const start = (appState.page - 1) * appState.pageSize + 1;
   const end = start + appState.results.length - 1;
-  resultMetaNode.textContent = `关键词“${appState.lastKeyword}”当前显示 ${start}-${end}，共 ${totalLabel(appState.total, appState.totalExact)} 条。`;
+  resultMetaNode.textContent = `${queryLabel}当前显示 ${start}-${end}，共 ${totalLabel(appState.total, appState.totalExact)} 条${modeLabel}。`;
 }
 
 // bookCached 查询服务器本地是否已缓存该书（轻量接口，只查元数据）。

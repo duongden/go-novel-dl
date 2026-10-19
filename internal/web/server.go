@@ -107,6 +107,7 @@ type SiteStat struct {
 
 type searchRequest struct {
 	Keyword   string   `json:"keyword"`
+	Tag       string   `json:"tag"`
 	Scope     string   `json:"scope"`
 	Sites     []string `json:"sites"`
 	Limit     int      `json:"limit"`
@@ -638,6 +639,11 @@ func newRouter(service *Service) *gin.Engine {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "no searchable download sources available"})
 			return
 		}
+		req.Tag = strings.TrimSpace(req.Tag)
+		if req.Tag != "" && len(sites) != 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tag search requires exactly one source"})
+			return
+		}
 		page := clampPositive(req.Page, 1)
 		pageSize := clampPositive(req.PageSize, service.PageSize)
 		fetchLimit := page*pageSize + 1
@@ -654,6 +660,7 @@ func newRouter(service *Service) *gin.Engine {
 			OverallLimit: maxInt(req.Limit, fetchLimit),
 			PerSiteLimit: siteLimit,
 			Exact:        req.Exact,
+			Tag:          req.Tag,
 		})
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

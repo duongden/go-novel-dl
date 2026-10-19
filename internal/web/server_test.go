@@ -497,14 +497,19 @@ func TestBookDetailRendersOriginalSourceTags(t *testing.T) {
 	script := string(scriptData)
 	for _, needle := range []string{
 		`function normalizeDetailTags(value)`,
+		`function searchDetailTag(tagText, sourceSite)`,
 		`const bookTags = normalizeDetailTags(book && book.tags);`,
 		`tagsNode.className = "detail-book-tags"`,
 		`tagsLabel.textContent = "原站标签"`,
 		`tagNode.className = "detail-book-tag"`,
 		`tagNode.type = "button"`,
-		"tagNode.title = `搜索标签：${tagText}`",
-		`keywordInput.value = tagText`,
-		`void performSearch(false)`,
+		"tagNode.title = `按原站标签搜索：${tagText}`",
+		`tagNode.addEventListener("click", () => searchDetailTag(tagText, activeVariant.site));`,
+		`keywordInput.value = tag`,
+		`void performSearch(false, { sites, tag: sourceKeySet.has(sourceSite) ? tag : "" });`,
+		`if (tagSearch) requestBody.tag = tagSearch;`,
+		`payload.tag_search`,
+		`searchState.tag_search = "1"`,
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected detail tag script to contain %s", needle)
@@ -1021,6 +1026,38 @@ func TestSearchEndpointExactFiltersResults(t *testing.T) {
 	}
 	if payload.Results[0].Primary.BookID != "001" {
 		t.Fatalf("unexpected exact result: %+v", payload.Results[0].Primary)
+	}
+}
+
+func TestSearchEndpointUsesNativeSourceTagSearch(t *testing.T) {
+	service := newTestService()
+	router := newRouter(service)
+
+	body := strings.NewReader(`{
+		"keyword":"都市",
+		"tag":"都市",
+		"sites":["esjzone"],
+		"page":1,
+		"page_size":20
+	}`)
+	req := httptest.NewRequest(http.MethodPost, RoutePrefix+"/api/search", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", resp.Code, resp.Body.String())
+	}
+
+	var payload paginatedSearchResponse
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode search payload: %v", err)
+	}
+	if !payload.TagSearch {
+		t.Fatalf("expected native tag search to be reported")
+	}
+	if len(payload.Results) != 1 || payload.Results[0].Primary.BookID != "101" {
+		t.Fatalf("unexpected native tag results: %+v", payload.Results)
 	}
 }
 
@@ -1567,6 +1604,9 @@ func newTestServiceWithOptions(opts testServiceOptions) *Service {
 				{Site: "esjzone", BookID: "004", Title: "Alpha 04", Author: "Author", Description: "Desc 4"},
 				{Site: "esjzone", BookID: "005", Title: "Alpha 05", Author: "Author", Description: "Desc 5"},
 			},
+			tagResults: []model.SearchResult{
+				{Site: "esjzone", BookID: "101", Title: "原站标签结果", Author: "Tag Author"},
+			},
 			book: &model.Book{
 				Site:        "esjzone",
 				ID:          "001",
@@ -1657,6 +1697,7 @@ type fakeWebSite struct {
 	displayName  string
 	capabilities site.Capabilities
 	results      []model.SearchResult
+	tagResults   []model.SearchResult
 	book         *model.Book
 	chapter      model.Chapter
 
@@ -1736,6 +1777,14 @@ func (s fakeWebSite) Download(ctx context.Context, ref model.BookRef) (*model.Bo
 
 func (s fakeWebSite) Search(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
 	items := append([]model.SearchResult(nil), s.results...)
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (s fakeWebSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	items := append([]model.SearchResult(nil), s.tagResults...)
 	if limit > 0 && len(items) > limit {
 		items = items[:limit]
 	}

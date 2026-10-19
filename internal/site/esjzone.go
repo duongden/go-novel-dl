@@ -204,6 +204,18 @@ func (s *ESJZoneSite) FetchChapter(ctx context.Context, bookID string, chapter m
 }
 
 func (s *ESJZoneSite) Search(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
+	return s.search(ctx, keyword, limit)
+}
+
+// SearchTag uses ESJ's native /tags/<tag>/ listing instead of its keyword
+// search. ESJ exposes the same route for both mode because the site's search
+// form submits to a tag route; keeping the wrapper explicit lets the web UI
+// distinguish a native tag query from a keyword fallback.
+func (s *ESJZoneSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	return s.search(ctx, tag, limit)
+}
+
+func (s *ESJZoneSite) search(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, nil

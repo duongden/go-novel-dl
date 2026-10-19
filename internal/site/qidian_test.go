@@ -1,7 +1,10 @@
 package site
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -94,6 +97,39 @@ func TestParseQidianMobileSearchResults(t *testing.T) {
 	}
 	if got.CoverURL != "https://bookcover.yuewen.com/qdbimg/349573/1022639665/180" {
 		t.Fatalf("unexpected mobile cover url: %q", got.CoverURL)
+	}
+}
+
+func TestQidianSearchTagUsesMobileTagPage(t *testing.T) {
+	var requestedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		_, _ = w.Write([]byte(`<html><body>
+<div class="_bookList_1nry3_373">
+  <a href="//m.qidian.com/book/1035420986/" title="玄鉴仙族" class="_bookItem_1nry3_415">
+    <div class="_info_1nry3_432">
+      <h3 class="_bookName_1nry3_437">玄鉴仙族</h3>
+      <p class="_meta_1nry3_481"><span>季越人</span><span>仙侠</span></p>
+      <p class="_desc_1nry3_528">家族修仙故事。</p>
+    </div>
+  </a>
+</div>
+</body></html>`))
+	}))
+	defer server.Close()
+
+	site := NewQidianSite(config.DefaultConfig().ResolveSiteConfig("qidian"))
+	site = rewriteQidianTestSite(t, site, server.URL)
+
+	results, err := site.SearchTag(context.Background(), "穿越", 10)
+	if err != nil {
+		t.Fatalf("search qidian tag: %v", err)
+	}
+	if requestedPath != "/category/tags/穿越/" {
+		t.Fatalf("expected mobile tag route, got %q", requestedPath)
+	}
+	if len(results) != 1 || results[0].BookID != "1035420986" || results[0].Title != "玄鉴仙族" {
+		t.Fatalf("unexpected qidian tag results: %+v", results)
 	}
 }
 

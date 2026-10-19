@@ -27,6 +27,12 @@ type Site interface {
 	ResolveURL(rawURL string) (*ResolvedURL, bool)
 }
 
+// TagSearcher is implemented by sites that expose a native tag/category search.
+// Callers should fall back to Site.Search when a site does not implement it.
+type TagSearcher interface {
+	SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error)
+}
+
 type ResolvedURL struct {
 	SiteKey   string
 	BookID    string

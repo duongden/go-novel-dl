@@ -526,6 +526,14 @@ func parseAliceswDecryptedChapterContent(content string) []string {
 }
 
 func (s *AliceswSite) Search(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
+	return s.search(ctx, keyword, "_all", limit)
+}
+
+func (s *AliceswSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	return s.search(ctx, tag, "tag", limit)
+}
+
+func (s *AliceswSite) search(ctx context.Context, keyword, filter string, limit int) ([]model.SearchResult, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return nil, nil
@@ -540,7 +548,7 @@ func (s *AliceswSite) Search(ctx context.Context, keyword string, limit int) ([]
 	seen := make(map[string]struct{}, target)
 collect:
 	for page := 1; ; page++ {
-		markup, err := s.searchPage(ctx, keyword, page)
+		markup, err := s.searchPageWithFilter(ctx, keyword, filter, page)
 		if err != nil {
 			return nil, err
 		}
@@ -636,9 +644,13 @@ func (s *AliceswSite) resolveChapterBookID(rawURL string) string {
 }
 
 func (s *AliceswSite) searchPage(ctx context.Context, keyword string, page int) (string, error) {
+	return s.searchPageWithFilter(ctx, keyword, "_all", page)
+}
+
+func (s *AliceswSite) searchPageWithFilter(ctx context.Context, keyword, filter string, page int) (string, error) {
 	values := url.Values{}
 	values.Set("q", keyword)
-	values.Set("f", "_all")
+	values.Set("f", filter)
 	values.Set("sort", "relevance")
 	if page > 1 {
 		values.Set("p", fmt.Sprintf("%d", page))

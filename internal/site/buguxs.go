@@ -489,6 +489,56 @@ func (s *BuguxsSite) Search(ctx context.Context, keyword string, limit int) ([]m
 	return results, nil
 }
 
+// SearchTag resolves the human-facing tag through Buguxs' tag index and then
+// reads the native tag listing. A missing index entry is returned as an error
+// so the hybrid search layer can fall back to an ordinary keyword search.
+func (s *BuguxsSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	tagURL, err := s.resolveTagURL(ctx, tag)
+	if err != nil {
+		return nil, err
+	}
+	markup, err := s.getWithMobileUA(ctx, tagURL)
+	if err != nil {
+		return nil, err
+	}
+	return parseBuguxsSearchResults(markup, limit)
+}
+
+func (s *BuguxsSite) resolveTagURL(ctx context.Context, tag string) (string, error) {
+	markup, err := s.getWithMobileUA(ctx, "https://www.buguxs.com/tags/")
+	if err != nil {
+		return "", err
+	}
+	return parseBuguxsTagIndexURL(markup, tag)
+}
+
+func parseBuguxsTagIndexURL(markup, tag string) (string, error) {
+	doc, err := parseHTML(markup)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range findAll(doc, func(n *html.Node) bool {
+		return n.Type == html.ElementNode && n.Data == "a" && strings.HasPrefix(strings.TrimSpace(attrValue(n, "href")), "/tags/")
+	}) {
+		label := strings.TrimSpace(attrValue(a, "title"))
+		if label == "" {
+			label = cleanText(nodeText(a))
+		}
+		if !strings.EqualFold(label, tag) {
+			continue
+		}
+		return absolutizeURL("https://www.buguxs.com", attrValue(a, "href")), nil
+	}
+	return "", fmt.Errorf("buguxs native tag %q not found", tag)
+}
+
 func parseBuguxsSearchResults(markup string, limit int) ([]model.SearchResult, error) {
 	doc, err := parseHTML(markup)
 	if err != nil {

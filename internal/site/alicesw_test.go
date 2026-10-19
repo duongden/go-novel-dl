@@ -68,6 +68,45 @@ func TestParseAliceswSearchResults(t *testing.T) {
 	}
 }
 
+func TestAliceswSearchTagUsesNativeTagFilter(t *testing.T) {
+	var receivedFilter string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/search.html":
+			receivedFilter = r.URL.Query().Get("f")
+			_, _ = w.Write([]byte(`<html><body>
+<div class="list-group">
+  <div class="list-group-item">
+    <h5><a href="/novel/7001.html">标签搜索结果</a></h5>
+    <p class="mb-1 text-muted">作者：<a href="/search.html?q=tester&f=author">tester</a></p>
+    <p class="content-txt">原站标签检索结果。</p>
+  </div>
+</div>
+</body></html>`))
+		case "/novel/7001.html":
+			_, _ = w.Write([]byte(`<html><body><div class="novel_title">标签搜索结果</div></body></html>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.DefaultConfig().ResolveSiteConfig("alicesw")
+	site := NewAliceswSite(cfg)
+	site.base = server.URL
+
+	results, err := site.SearchTag(context.Background(), "都市", 10)
+	if err != nil {
+		t.Fatalf("search tag: %v", err)
+	}
+	if receivedFilter != "tag" {
+		t.Fatalf("expected native tag filter, got %q", receivedFilter)
+	}
+	if len(results) != 1 || results[0].BookID != "7001" {
+		t.Fatalf("unexpected tag results: %+v", results)
+	}
+}
+
 func TestParseAliceswCatalogChaptersAndChapterPage(t *testing.T) {
 	catalogDoc := parseHTMLDoc(t, `<html><body>
 <ul class="mulu_list">

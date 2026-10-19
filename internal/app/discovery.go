@@ -20,6 +20,7 @@ type HybridSearchOptions struct {
 	PerSiteLimit   int           `json:"per_site_limit,omitempty"`
 	PerSiteTimeout time.Duration `json:"-"`
 	Exact          bool          `json:"exact,omitempty"`
+	Tag            string        `json:"tag,omitempty"`
 }
 
 // 聚合搜索达到配额后给慢渠道的宽限期：快渠道往往一次返回大量泛匹配，
@@ -49,16 +50,18 @@ type HybridSearchResult struct {
 }
 
 type HybridSearchResponse struct {
-	Keyword  string               `json:"keyword"`
-	Sites    []string             `json:"sites"`
-	Results  []HybridSearchResult `json:"results"`
-	Warnings []SearchWarning      `json:"warnings,omitempty"`
+	Keyword   string               `json:"keyword"`
+	Sites     []string             `json:"sites"`
+	Results   []HybridSearchResult `json:"results"`
+	Warnings  []SearchWarning      `json:"warnings,omitempty"`
+	TagSearch bool                 `json:"tag_search,omitempty"`
 }
 
 type siteSearchResponse struct {
-	siteKey string
-	items   []model.SearchResult
-	err     error
+	siteKey   string
+	items     []model.SearchResult
+	err       error
+	tagSearch bool
 }
 
 type hybridSearchGroup struct {
@@ -131,6 +134,7 @@ func (r *Runtime) HybridSearch(ctx context.Context, keyword string, opts HybridS
 	defer cancelSearches()
 
 	siteResults := make(chan siteSearchResponse, len(sites))
+	tagSearchUsed := false
 	var wg sync.WaitGroup
 	for _, siteKey := range sites {
 		wg.Add(1)
@@ -162,17 +166,29 @@ func (r *Runtime) HybridSearch(ctx context.Context, keyword string, opts HybridS
 			}
 			defer cancel()
 
-			items, err := client.Search(siteCtx, keyword, perSiteLimit)
+			var items []model.SearchResult
+			usedTagSearch := false
+			if tag := strings.TrimSpace(opts.Tag); tag != "" && len(sites) == 1 {
+				if tagSearcher, ok := client.(site.TagSearcher); ok {
+					items, err = tagSearcher.SearchTag(siteCtx, tag, perSiteLimit)
+					usedTagSearch = err == nil
+				}
+				if !usedTagSearch {
+					items, err = client.Search(siteCtx, keyword, perSiteLimit)
+				}
+			} else {
+				items, err = client.Search(siteCtx, keyword, perSiteLimit)
+			}
 			if err != nil {
 				siteResults <- siteSearchResponse{siteKey: siteKey, err: err}
 				return
 			}
 
 			items = textconv.NormalizeSearchResultsLocale(items, resolved.General.LocaleStyle)
-			if opts.Exact {
+			if opts.Exact && !usedTagSearch {
 				items = filterSearchResultsByKeyword(items, normalizeSearchKeywordLocale(keyword, resolved.General.LocaleStyle))
 			}
-			siteResults <- siteSearchResponse{siteKey: siteKey, items: items}
+			siteResults <- siteSearchResponse{siteKey: siteKey, items: items, tagSearch: usedTagSearch}
 		}(siteKey)
 	}
 
@@ -187,6 +203,7 @@ func (r *Runtime) HybridSearch(ctx context.Context, keyword string, opts HybridS
 		select {
 		case result := <-siteResults:
 			completed++
+			tagSearchUsed = tagSearchUsed || result.tagSearch
 			if result.err != nil {
 				warnings = append(warnings, SearchWarning{
 					Site:  result.siteKey,
@@ -204,29 +221,30 @@ func (r *Runtime) HybridSearch(ctx context.Context, keyword string, opts HybridS
 		case <-graceCh:
 			cancelSearches()
 			aggregated := groupHybridSearchResults(rawResults, keyword, r.Registry.DefaultSearchKeys(), opts.OverallLimit)
-			return newHybridSearchResponse(keyword, sites, aggregated, warnings), nil
+			return newHybridSearchResponse(keyword, sites, aggregated, warnings, tagSearchUsed), nil
 		case <-ctx.Done():
 			cancelSearches()
 			aggregated := groupHybridSearchResults(rawResults, keyword, r.Registry.DefaultSearchKeys(), opts.OverallLimit)
-			return newHybridSearchResponse(keyword, sites, aggregated, warnings), nil
+			return newHybridSearchResponse(keyword, sites, aggregated, warnings, tagSearchUsed), nil
 		}
 	}
 
 	wg.Wait()
 	cancelSearches()
 	aggregated := groupHybridSearchResults(rawResults, keyword, r.Registry.DefaultSearchKeys(), opts.OverallLimit)
-	return newHybridSearchResponse(keyword, sites, aggregated, warnings), nil
+	return newHybridSearchResponse(keyword, sites, aggregated, warnings, tagSearchUsed), nil
 }
 
-func newHybridSearchResponse(keyword string, sites []string, results []HybridSearchResult, warnings []SearchWarning) HybridSearchResponse {
+func newHybridSearchResponse(keyword string, sites []string, results []HybridSearchResult, warnings []SearchWarning, tagSearch bool) HybridSearchResponse {
 	sort.SliceStable(warnings, func(i, j int) bool {
 		return warnings[i].Site < warnings[j].Site
 	})
 	return HybridSearchResponse{
-		Keyword:  keyword,
-		Sites:    sites,
-		Results:  results,
-		Warnings: warnings,
+		Keyword:   keyword,
+		Sites:     sites,
+		Results:   results,
+		Warnings:  warnings,
+		TagSearch: tagSearch,
 	}
 }
 
