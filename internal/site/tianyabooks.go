@@ -251,6 +251,7 @@ func parseTianyabooksBookPage(markup, baseURL, bookID string) (*model.Book, erro
 		CoverURL: absolutizeURL(baseURL, attrValue(findFirst(doc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "catalog")
 		}), "src")),
+		Tags:     extractCommonBookTags(doc),
 		Chapters: chapters,
 	}, nil
 }

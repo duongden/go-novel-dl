@@ -182,6 +182,7 @@ func (s *TongrensheSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*
 		Description:  description,
 		SourceURL:    s.bookURL(ref.BookID),
 		CoverURL:     coverURL,
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 		Chapters:     applyChapterRange(chapters, ref),

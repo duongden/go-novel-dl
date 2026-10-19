@@ -523,6 +523,7 @@ func (s *ShencouSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mod
 		CoverURL: lightNovelAbsURL(s.baseURL, attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && strings.Contains(attrValue(n.Parent, "href"), "/files/article/image")
 		}), "src")),
+		Tags:         extractCommonBookTags(infoDoc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 		Chapters:     applyChapterRange(chapters, ref),

@@ -189,7 +189,8 @@ func TestAliceswDownloadPlanUsesDetailPageChaptersBeforeCatalogEndpoint(t *testi
 		switch r.URL.Path {
 		case "/novel/50427.html":
 			_, _ = w.Write([]byte(`<html><body>
-<div id="detail-box"><div class="box_info"><div class="novel_title">测试书</div></div></div>
+<div id="detail-box"><div class="box_info"><div class="novel_title">测试书</div>
+<div class="tags_list">标签：<a class="red"><em>#</em>都市</a><a class="red">#重生</a></div></div></div>
 <ul class="mulu_list">
   <li><a href="/book/51676/1af0fd0e46369.html">第一章</a></li>
 </ul>
@@ -213,6 +214,9 @@ func TestAliceswDownloadPlanUsesDetailPageChaptersBeforeCatalogEndpoint(t *testi
 	}
 	if len(book.Chapters) != 1 || book.Chapters[0].ID != "51676-1af0fd0e46369" {
 		t.Fatalf("unexpected chapters: %+v", book.Chapters)
+	}
+	if len(book.Tags) != 2 || book.Tags[0] != "都市" || book.Tags[1] != "重生" {
+		t.Fatalf("unexpected book tags: %v", book.Tags)
 	}
 	if got := atomic.LoadInt32(&catalogHits); got != 0 {
 		t.Fatalf("expected catalog endpoint not to be requested, got %d hits", got)

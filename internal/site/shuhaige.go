@@ -141,6 +141,7 @@ func (s *ShuhaigeSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		Description:  desc,
 		SourceURL:    s.base + "/" + bookID + "/",
 		CoverURL:     cover,
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 		Chapters:     applyChapterRange(dedupChapters(chapters), ref),

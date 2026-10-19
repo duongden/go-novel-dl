@@ -249,6 +249,7 @@ func (s *mobile17Site) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		Description:  description,
 		SourceURL:    s.bookURL(bookID),
 		CoverURL:     cover,
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

@@ -52,6 +52,7 @@ func TestNovalpieFullFlowUsesEncryptedChapterAPI(t *testing.T) {
 				"author_name": "Author",
 				"description": "Intro",
 				"photo_url":   "/cover.jpg",
+				"tags":        []string{"奇幻", " 冒险 ", "", "奇幻"},
 			})
 		case "/api/novels/1059/chapters":
 			assertNovalpieAuth(t, r, token)
@@ -128,6 +129,9 @@ func TestNovalpieFullFlowUsesEncryptedChapterAPI(t *testing.T) {
 	}
 	if book.SourceURL != server.URL+"/book/1059" {
 		t.Fatalf("unexpected book source url: %q", book.SourceURL)
+	}
+	if len(book.Tags) != 2 || book.Tags[0] != "奇幻" || book.Tags[1] != "冒险" {
+		t.Fatalf("unexpected book tags: %v", book.Tags)
 	}
 
 	chapter, err := site.FetchChapter(context.Background(), book.ID, book.Chapters[0])

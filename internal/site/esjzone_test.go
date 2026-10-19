@@ -87,6 +87,24 @@ func TestExtractDetailAuthor(t *testing.T) {
 	}
 }
 
+func TestParseESJZoneBookPageIncludesOriginalTags(t *testing.T) {
+	site := NewESJZoneSite(config.DefaultConfig().ResolveSiteConfig("esjzone"))
+	markup := `<html><body>
+		<h2 class="text-normal">测试书</h2>
+		<ul><li><strong>作者:</strong><a href="/tags/author/">测试作者</a></li></ul>
+		<div class="description"><p>简介</p></div>
+		<div class="widget-tags"><div class="show-tag"><a href="/tags/fantasy/">奇幻</a><a href="/tags/adventure/">冒险</a></div></div>
+		<div id="chapterList"><a href="https://www.esjzone.one/forum/1/11.html" data-title="第一章"><p>第一章</p></a></div>
+	</body></html>`
+	book, _, err := site.parseBookPage(markup, "https://www.esjzone.one/detail/1.html", "1")
+	if err != nil {
+		t.Fatalf("parse book page: %v", err)
+	}
+	if len(book.Tags) != 2 || book.Tags[0] != "奇幻" || book.Tags[1] != "冒险" {
+		t.Fatalf("unexpected book tags: %v", book.Tags)
+	}
+}
+
 func TestExtractSearchAuthor(t *testing.T) {
 	markup := `<div class="card-body"><div class="card-author"><i class="icon-pen-tool"></i> <a href="/tags/23r41/">23r41</a></div></div>`
 	node := parseHTMLDoc(t, markup)

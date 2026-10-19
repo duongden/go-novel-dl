@@ -97,7 +97,7 @@ func (s *N69ShubaSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		return n.Type == html.ElementNode && n.Data == "a" && hasAncestorClass(n, "booknav2") && hasAncestorTag(n, "p")
 	}))), Description: cleanText(nodeText(findFirst(infoDoc, func(n *html.Node) bool { return n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "navtxt") }))), SourceURL: fmt.Sprintf("https://www.69shuba.com/book/%s.htm", ref.BookID), CoverURL: attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 		return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "bookimg2")
-	}), "src"), DownloadedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	}), "src"), Tags: extractCommonBookTags(infoDoc), DownloadedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	chapters := make([]model.Chapter, 0)
 	for _, a := range findAll(catalogDoc, func(n *html.Node) bool {
 		return n.Type == html.ElementNode && n.Data == "a" && hasAncestorByID(n, "catalog")

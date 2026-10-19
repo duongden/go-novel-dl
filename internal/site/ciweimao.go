@@ -174,6 +174,7 @@ func (s *CiweimaoSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		CoverURL: fallback(metaProperty(infoDoc, "og:image"), attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "cover")
 		}), "src")),
+		Tags:         extractCommonBookTags(infoDoc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

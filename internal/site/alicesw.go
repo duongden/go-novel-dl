@@ -614,7 +614,7 @@ func (s *AliceswSite) parseBookDetail(doc *html.Node, bookID string) *model.Book
 		Description:  extractAliceswBookSummary(doc),
 		SourceURL:    s.bookURL(bookID),
 		CoverURL:     extractAliceswBookCover(doc, s.base),
-		Tags:         extractAliceswBookTags(doc),
+		Tags:         normalizeBookTags(append(extractAliceswBookTags(doc), extractCommonBookTags(doc)...)),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

@@ -110,6 +110,7 @@ func (s *YibigeSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 		CoverURL: fallback(metaProperty(infoDoc, "og:image"), attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorByID(n, "fmimg")
 		}), "src")),
+		Tags:         extractCommonBookTags(infoDoc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

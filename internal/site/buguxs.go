@@ -112,9 +112,10 @@ func (s *BuguxsSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 		Author: fallback(metaProperty(doc, "og:novel:author"), cleanText(nodeText(findFirst(doc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "p" && hasClass(n, "author")
 		})))),
-		Description: fallback(metaProperty(doc, "og:description"), cleanText(nodeTextPreserveLineBreaks(findFirstByID(doc, "bookIntro")))),
-		SourceURL:   catalogURL,
-		CoverURL:    metaProperty(doc, "og:image"),
+		Description:  fallback(metaProperty(doc, "og:description"), cleanText(nodeTextPreserveLineBreaks(findFirstByID(doc, "bookIntro")))),
+		SourceURL:    catalogURL,
+		CoverURL:     metaProperty(doc, "og:image"),
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -522,10 +523,10 @@ func parseBuguxsSearchResults(markup string, limit int) ([]model.SearchResult, e
 			}), "src")
 		}
 		results = append(results, model.SearchResult{
-			Site:        "buguxs",
-			BookID:      match[1] + "/" + match[2],
-			Title:       title,
-			Author:      cleanText(nodeText(findFirst(box, func(n *html.Node) bool {
+			Site:   "buguxs",
+			BookID: match[1] + "/" + match[2],
+			Title:  title,
+			Author: cleanText(nodeText(findFirst(box, func(n *html.Node) bool {
 				return n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "author")
 			}))),
 			Description: cleanText(nodeTextPreserveLineBreaks(findFirst(box, func(n *html.Node) bool {

@@ -107,6 +107,7 @@ func (s *HaiwaishubaoSite) DownloadPlan(ctx context.Context, ref model.BookRef) 
 		CoverURL: normalizeMaybeProtocol(haiwaishubaoFirstNonEmpty(metaProperty(infoDoc, "og:image"), attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "BGsectionOne-top-left")
 		}), "src"))),
+		Tags:         extractCommonBookTags(infoDoc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

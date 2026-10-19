@@ -141,6 +141,7 @@ func (s *LinovelibSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*m
 		CoverURL: fallback(metaProperty(infoDoc, "og:image"), attrValue(findFirst(infoDoc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "book-img")
 		}), "src")),
+		Tags:         extractCommonBookTags(infoDoc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
@@ -741,17 +742,17 @@ func parseLinovelibSearchResults(markup string, limit int) ([]model.SearchResult
 			}), "src")
 		}
 		results = append(results, model.SearchResult{
-			Site:        "linovelib",
-			BookID:      match[1],
-			Title:       title,
-			Author:      strings.TrimSpace(strings.TrimPrefix(cleanText(nodeText(findFirst(li, func(n *html.Node) bool {
+			Site:   "linovelib",
+			BookID: match[1],
+			Title:  title,
+			Author: strings.TrimSpace(strings.TrimPrefix(cleanText(nodeText(findFirst(li, func(n *html.Node) bool {
 				return n.Type == html.ElementNode && n.Data == "span" && hasClass(n, "book-author")
 			}))), "作者")),
 			Description: strings.ToValidUTF8(cleanText(nodeTextPreserveLineBreaks(findFirst(li, func(n *html.Node) bool {
 				return n.Type == html.ElementNode && n.Data == "p" && hasClass(n, "book-desc")
 			}))), "�"),
-			URL:         fmt.Sprintf("https://www.linovelib.com/novel/%s.html", match[1]),
-			CoverURL:    absolutizeURL("https://www.bilinovel.com", cover),
+			URL:      fmt.Sprintf("https://www.linovelib.com/novel/%s.html", match[1]),
+			CoverURL: absolutizeURL("https://www.bilinovel.com", cover),
 		})
 		if limit > 0 && len(results) >= limit {
 			break
@@ -902,7 +903,8 @@ func parseLinovelibS6SearchResults(markup string, limit int) []model.SearchResul
 	return results
 }
 
-func parseLinovelibStorePage(markup string) ([]model.SearchResult, int, string, error) {	doc, err := parseHTML(markup)
+func parseLinovelibStorePage(markup string) ([]model.SearchResult, int, string, error) {
+	doc, err := parseHTML(markup)
 	if err != nil {
 		return nil, 0, "", err
 	}

@@ -104,6 +104,7 @@ func (s *HongxiuzhaoSite) DownloadPlan(ctx context.Context, ref model.BookRef) (
 		CoverURL: absolutizeURL("https://hongxiuzhao.net", attrValue(findFirst(doc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "cover")
 		}), "src")),
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

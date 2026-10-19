@@ -192,6 +192,7 @@ func (s *FsshuSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*model
 		Description:  cleanFsshuDescription(metaProperty(doc, "og:description")),
 		SourceURL:    fmt.Sprintf("%s/%s/%s/", s.baseURL, s.bookPrefix, bookPath),
 		CoverURL:     normalizeMaybeProtocol(metaProperty(doc, "og:image")),
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

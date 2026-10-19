@@ -75,19 +75,20 @@ type novalpieLoginResponse struct {
 }
 
 type novalpieNovelDetail struct {
-	Success             bool   `json:"success"`
-	Message             string `json:"message"`
-	ID                  int64  `json:"id"`
-	Title               string `json:"title"`
-	TrueName            string `json:"true_name"`
-	TrueNameCamel       string `json:"trueName"`
-	AuthorName          string `json:"author_name"`
-	AuthorNameCamel     string `json:"authorName"`
-	Description         string `json:"description"`
-	PhotoURL            string `json:"photo_url"`
-	PhotoURLCamel       string `json:"photoUrl"`
-	LatestChapterAt     string `json:"latest_chapter_at"`
-	LatestChapterAtText string `json:"latestChapterAt"`
+	Success             bool     `json:"success"`
+	Message             string   `json:"message"`
+	ID                  int64    `json:"id"`
+	Title               string   `json:"title"`
+	TrueName            string   `json:"true_name"`
+	TrueNameCamel       string   `json:"trueName"`
+	AuthorName          string   `json:"author_name"`
+	AuthorNameCamel     string   `json:"authorName"`
+	Description         string   `json:"description"`
+	PhotoURL            string   `json:"photo_url"`
+	PhotoURLCamel       string   `json:"photoUrl"`
+	Tags                []string `json:"tags"`
+	LatestChapterAt     string   `json:"latest_chapter_at"`
+	LatestChapterAtText string   `json:"latestChapterAt"`
 }
 
 type novalpieChaptersResponse struct {
@@ -283,6 +284,7 @@ func (s *NovalpieSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		Description:  detail.Description,
 		SourceURL:    s.novelURL(ref.BookID),
 		CoverURL:     fallback(detail.PhotoURL, detail.PhotoURLCamel),
+		Tags:         normalizeBookTags(detail.Tags),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

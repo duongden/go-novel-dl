@@ -61,8 +61,11 @@ func TestMobile17DownloadPlanAndFetchChapter(t *testing.T) {
 <meta property="og:novel:author" content="测试作者">
 <meta property="og:description" content="简介内容">
 <meta property="og:image" content="/cover.jpg">
+<meta property="og:novel:category" content="辣文合集">
 </head><body>
 <form name="searchform" action="/s.php"><select id="searchType" name="type"><option value="articlename"></option></select></form>
+<p>分类：<a href="/sort/9_1/">辣文合集</a></p>
+<p>状态：连载中</p>
 <div class="intro">最新章节预览</div>
 <ul class="chapter"><li><a href="/book/123/4.html">第4章<span></span></a></li></ul>
 <div class="intro">正文</div>
@@ -130,6 +133,9 @@ func TestMobile17DownloadPlanAndFetchChapter(t *testing.T) {
 	}
 	if book.Title != "测试书名" || book.Author != "测试作者" {
 		t.Fatalf("unexpected book metadata: %+v", book)
+	}
+	if len(book.Tags) != 1 || book.Tags[0] != "辣文合集" {
+		t.Fatalf("unexpected book tags: %v", book.Tags)
 	}
 	if len(book.Chapters) != 4 {
 		t.Fatalf("expected 4 chapters, got %d", len(book.Chapters))

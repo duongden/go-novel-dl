@@ -172,6 +172,7 @@ func (s *Biquge345Site) DownloadPlan(ctx context.Context, ref model.BookRef) (*m
 		CoverURL: absolutizeURL(base, attrValue(findFirst(doc, func(n *html.Node) bool {
 			return n.Type == html.ElementNode && n.Data == "img" && hasAncestorClass(n, "zhutu")
 		}), "src")),
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}

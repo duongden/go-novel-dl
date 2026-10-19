@@ -1861,6 +1861,16 @@ async function warmupDetailCache(results) {
   await Promise.all(Array.from({ length: workers }, worker));
 }
 
+function normalizeDetailTags(value) {
+  const items = Array.isArray(value) ? value : (typeof value === "string" ? [value] : []);
+  const seen = new Set();
+  return items.map((tag) => String(tag == null ? "" : tag).trim()).filter((tag) => {
+    if (!tag || seen.has(tag)) return false;
+    seen.add(tag);
+    return true;
+  });
+}
+
 function renderDetail(result, variant, detail, loading, errorMessage) {
   detailContentNode.innerHTML = "";
   const activeVariant = variant || result.primary;
@@ -1871,6 +1881,7 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
   const title = displayDetailTitle(result, activeVariant, book);
   const author = displayDetailAuthor(result, activeVariant, book);
   const description = displayDetailDescription(result, book);
+  const bookTags = normalizeDetailTags(book && book.tags);
   const chapters = Array.isArray(book && book.chapters) ? book.chapters : [];
 
   const hero = document.createElement("section");
@@ -1906,6 +1917,23 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
   if (result.latest_chapter) meta.appendChild(resultBadge(result.latest_chapter));
   if (result.source_count > 1) meta.appendChild(resultBadge(`${result.source_count} 个来源`));
   summary.appendChild(meta);
+
+  if (bookTags.length) {
+    const tagsNode = document.createElement("div");
+    tagsNode.className = "detail-book-tags";
+    tagsNode.setAttribute("aria-label", "原站标签");
+    const tagsLabel = document.createElement("span");
+    tagsLabel.className = "detail-book-tags-label";
+    tagsLabel.textContent = "原站标签";
+    tagsNode.appendChild(tagsLabel);
+    bookTags.forEach((tagText) => {
+      const tagNode = document.createElement("span");
+      tagNode.className = "detail-book-tag";
+      tagNode.textContent = tagText;
+      tagsNode.appendChild(tagNode);
+    });
+    summary.appendChild(tagsNode);
+  }
 
   if (variants.length > 1) {
     const switchWrap = document.createElement("div");

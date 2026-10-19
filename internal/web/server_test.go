@@ -489,6 +489,42 @@ func TestMobileSearchAndSimilarControlsUseStableLayout(t *testing.T) {
 	}
 }
 
+func TestBookDetailRendersOriginalSourceTags(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		`function normalizeDetailTags(value)`,
+		`const bookTags = normalizeDetailTags(book && book.tags);`,
+		`tagsNode.className = "detail-book-tags"`,
+		`tagsLabel.textContent = "原站标签"`,
+		`tagNode.className = "detail-book-tag"`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected detail tag script to contain %s", needle)
+		}
+	}
+
+	styleData, err := templateFS.ReadFile("templates/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+	style := string(styleData)
+	for _, needle := range []string{
+		`.detail-book-tags { display: flex; flex-wrap: wrap;`,
+		`.detail-book-tags-label {`,
+		`.detail-book-tag {`,
+		`overflow-wrap: anywhere`,
+		`html[data-app-theme="night"] .detail-book-tag`,
+	} {
+		if !strings.Contains(style, needle) {
+			t.Fatalf("expected detail tag styles to contain %s", needle)
+		}
+	}
+}
+
 func TestReturnControlsAvoidFullWidthBars(t *testing.T) {
 	styleData, err := templateFS.ReadFile("templates/style.css")
 	if err != nil {

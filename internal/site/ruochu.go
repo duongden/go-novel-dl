@@ -101,12 +101,14 @@ func (s *RuochuSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 	}
 
 	catalogMeta := extractRuochuCatalogMetadata(catalogDoc)
+	bookTags := extractCommonBookTags(catalogDoc)
 	bookMeta := ruochuDetailMetadata{}
 
 	// The book page is flaky and can return 502, so it should never block detail/chapter loading.
 	if infoMarkup, infoErr := s.html.Get(ctx, bookURL); infoErr == nil {
 		if infoDoc, parseErr := parseHTML(infoMarkup); parseErr == nil {
 			bookMeta = extractRuochuBookMetadata(infoDoc)
+			bookTags = normalizeBookTags(append(bookTags, extractCommonBookTags(infoDoc)...))
 		}
 	}
 
@@ -119,6 +121,7 @@ func (s *RuochuSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 		Description:  fallback(bookMeta.Description, catalogMeta.Description),
 		SourceURL:    bookURL,
 		CoverURL:     fallback(bookMeta.CoverURL, catalogMeta.CoverURL),
+		Tags:         bookTags,
 		DownloadedAt: now,
 		UpdatedAt:    now,
 	}

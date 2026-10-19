@@ -107,6 +107,7 @@ func (s *MjyhbSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*model
 		Description:  mjyhbFirstNonEmpty(metaProperty(doc, "og:description"), cleanText(nodeText(findFirst(doc, func(n *html.Node) bool { return n.Type == html.ElementNode && n.Data == "div" && hasClass(n, "jj") })))),
 		SourceURL:    s.bookURL(bookID),
 		CoverURL:     normalizeMaybeProtocol(metaProperty(doc, "og:image")),
+		Tags:         extractCommonBookTags(doc),
 		DownloadedAt: time.Now().UTC(),
 		UpdatedAt:    time.Now().UTC(),
 	}
