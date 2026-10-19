@@ -1927,9 +1927,17 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
     tagsLabel.textContent = "原站标签";
     tagsNode.appendChild(tagsLabel);
     bookTags.forEach((tagText) => {
-      const tagNode = document.createElement("span");
+      const tagNode = document.createElement("button");
+      tagNode.type = "button";
       tagNode.className = "detail-book-tag";
       tagNode.textContent = tagText;
+      tagNode.title = `搜索标签：${tagText}`;
+      tagNode.setAttribute("aria-label", `搜索标签 ${tagText}`);
+      tagNode.addEventListener("click", () => {
+        keywordInput.value = tagText;
+        appState.page = 1;
+        void performSearch(false);
+      });
       tagsNode.appendChild(tagNode);
     });
     summary.appendChild(tagsNode);

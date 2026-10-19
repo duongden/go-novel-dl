@@ -1311,10 +1311,22 @@ body.web-images-blurred .result-card:hover .result-cover { transform: scale(1.07
 .detail-book-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-width: 0; }
 .detail-book-tags-label { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-weight: 650; }
 .detail-book-tag {
-  display: inline-flex; align-items: center; max-width: 100%; padding: 4px 9px;
+  display: inline-flex; align-items: center; max-width: 100%; min-height: 28px; padding: 4px 10px;
   border: 1px solid var(--accent-soft); border-radius: 999px;
   color: var(--accent-deep); background: var(--accent-soft);
-  font-size: 12px; line-height: 1.25; overflow-wrap: anywhere; word-break: break-word;
+  font: inherit; font-size: 12px; line-height: 1.25; text-align: left;
+  overflow-wrap: anywhere; word-break: break-word; cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.detail-book-tag:hover {
+  color: #fff; background: var(--accent); border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.detail-book-tag:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.detail-book-tag:active {
+  transform: translateY(0);
 }
 .detail-source-button.is-active { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 4px 10px var(--accent-glow); }
 .detail-actions { margin-top: auto; padding-top: 12px; }
@@ -2054,6 +2066,11 @@ html[data-app-theme] .detail-book-tag {
   background: var(--accent-soft);
   border-color: var(--line);
 }
+html[data-app-theme] .detail-book-tag:hover {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
 html[data-app-theme] .source-option-title,
 html[data-app-theme] .task-title,
 html[data-app-theme] .warning-summary-title,
@@ -2148,6 +2165,11 @@ html[data-app-theme="night"] .detail-book-tag {
   color: #dbeafe;
   background: #172638;
   border-color: #36536f;
+}
+html[data-app-theme="night"] .detail-book-tag:hover {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 html[data-app-theme="night"] .status-card[data-tone="empty"],
 html[data-app-theme="night"] .status-card[data-tone="warning"],

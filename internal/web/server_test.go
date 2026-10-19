@@ -501,6 +501,10 @@ func TestBookDetailRendersOriginalSourceTags(t *testing.T) {
 		`tagsNode.className = "detail-book-tags"`,
 		`tagsLabel.textContent = "原站标签"`,
 		`tagNode.className = "detail-book-tag"`,
+		`tagNode.type = "button"`,
+		"tagNode.title = `搜索标签：${tagText}`",
+		`keywordInput.value = tagText`,
+		`void performSearch(false)`,
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected detail tag script to contain %s", needle)
@@ -517,7 +521,11 @@ func TestBookDetailRendersOriginalSourceTags(t *testing.T) {
 		`.detail-book-tags-label {`,
 		`.detail-book-tag {`,
 		`overflow-wrap: anywhere`,
+		`.detail-book-tag:hover`,
+		`.detail-book-tag:focus-visible`,
+		`html[data-app-theme] .detail-book-tag:hover`,
 		`html[data-app-theme="night"] .detail-book-tag`,
+		`html[data-app-theme="night"] .detail-book-tag:hover`,
 	} {
 		if !strings.Contains(style, needle) {
 			t.Fatalf("expected detail tag styles to contain %s", needle)
