@@ -20,7 +20,17 @@ const (
 	discoveryRequestTimeout = 30 * time.Second
 )
 
-var defaultDiscoverySiteKeys = []string{"qidian", "ciweimao", "faloo", "fanqienovel"}
+var defaultDiscoverySiteKeys = []string{
+	"qidian",
+	"ciweimao",
+	"faloo",
+	"fanqienovel",
+	"n17k",
+	"sfacg",
+	"ciyuanji",
+	"kadokado",
+	"alphapolis",
+}
 
 type webDiscoveryCache struct {
 	mu      sync.Mutex
