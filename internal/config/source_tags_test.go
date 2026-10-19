@@ -86,6 +86,35 @@ func TestSourceTagsMigrationResetsBundledTagsAndPreservesLegacyEdits(t *testing.
 	}
 }
 
+func TestSourceTagsVersion3ResetsBundledV2TagsAndPreservesEdits(t *testing.T) {
+	resetSiteCatalogForTest(t)
+	if err := ensureSiteCatalogDB(); err != nil {
+		t.Fatalf("initialize site catalog: %v", err)
+	}
+
+	rows := []sourceTagEntry{
+		{SiteKey: "esjzone", Tags: `["简体中文","轻小说","转载站"]`, DefaultVersion: 2},
+		{SiteKey: "qidian", Tags: `["我的标签"]`, IsCustom: true, DefaultVersion: 2},
+	}
+	if err := siteCatalogDB.Create(&rows).Error; err != nil {
+		t.Fatalf("seed version 2 source tags: %v", err)
+	}
+
+	saved, err := EnsureSourceTags(map[string][]string{
+		"esjzone": {"轻小说", "翻译", "成人向"},
+		"qidian":  {"原创", "男性向", "阅文"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("migrate source tags: %v", err)
+	}
+	if !reflect.DeepEqual(saved["esjzone"], []string{"轻小说", "翻译", "成人向"}) {
+		t.Fatalf("expected bundled v2 tags to be simplified, got %v", saved["esjzone"])
+	}
+	if !reflect.DeepEqual(saved["qidian"], []string{"我的标签"}) {
+		t.Fatalf("expected custom v2 tags to be preserved, got %v", saved["qidian"])
+	}
+}
+
 func TestSourceTagsAllowEmptyAndRejectInvalidValues(t *testing.T) {
 	resetSiteCatalogForTest(t)
 

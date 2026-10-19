@@ -80,7 +80,7 @@ func TestMetaIncludesSearchableDownloadSources(t *testing.T) {
 	if esjzone.DisplayName != "ESJ Zone" {
 		t.Fatalf("expected metadata title for esjzone, got %q", esjzone.DisplayName)
 	}
-	wantTags := []string{"简体中文", "轻小说", "转载站", "翻译", "NSFW"}
+	wantTags := []string{"轻小说", "翻译", "成人向"}
 	if !reflect.DeepEqual(esjzone.Tags, wantTags) {
 		t.Fatalf("expected esjzone tags %v, got %v", wantTags, esjzone.Tags)
 	}
@@ -92,7 +92,7 @@ func TestMetaIncludesSearchableDownloadSources(t *testing.T) {
 	if aaatxt.DisplayName != "3A电子书" {
 		t.Fatalf("expected metadata title for aaatxt, got %q", aaatxt.DisplayName)
 	}
-	wantAaatxtTags := []string{"简体中文", "转载站", "成人向", "NSFW"}
+	wantAaatxtTags := []string{"网络小说", "成人向"}
 	if !reflect.DeepEqual(aaatxt.Tags, wantAaatxtTags) {
 		t.Fatalf("expected aaatxt tags %v, got %v", wantAaatxtTags, aaatxt.Tags)
 	}

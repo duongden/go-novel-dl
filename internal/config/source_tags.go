@@ -14,7 +14,7 @@ import (
 const (
 	maxSourceTagCount        = 16
 	maxSourceTagRuneSize     = 24
-	sourceTagDefaultsVersion = 2
+	sourceTagDefaultsVersion = 3
 )
 
 type SourceTagRecord struct {
