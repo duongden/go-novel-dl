@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,6 +43,11 @@ var n17kDiscoverySpecs = []n17kDiscoverySpec{
 	},
 }
 
+var n17kDiscoveryURLs = []string{
+	"https://www.17k.com/top/?from=novel-dl",
+	"https://www.17k.com/top/",
+}
+
 var _ DiscoveryProvider = (*N17KSite)(nil)
 
 func (s *N17KSite) DiscoveryLists(ctx context.Context) ([]DiscoveryList, error) {
@@ -68,11 +74,31 @@ func (s *N17KSite) DiscoveryBooks(ctx context.Context, listID string, limit int)
 		return nil, fmt.Errorf("n17k discovery list %q not found", listID)
 	}
 
-	markup, err := s.fetch(ctx, "https://www.17k.com/top/")
-	if err != nil {
-		return nil, err
+	return loadN17KDiscoveryResults(ctx, s.fetch, selected.Title, normalizeDiscoveryLimit(limit, 20))
+}
+
+func loadN17KDiscoveryResults(
+	ctx context.Context,
+	fetch func(context.Context, string) (string, error),
+	listTitle string,
+	limit int,
+) ([]model.SearchResult, error) {
+	failures := make([]error, 0, len(n17kDiscoveryURLs))
+	for _, rawURL := range n17kDiscoveryURLs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		markup, err := fetch(ctx, rawURL)
+		if err == nil {
+			var results []model.SearchResult
+			results, err = parseN17KDiscoveryResults(markup, listTitle, limit)
+			if err == nil {
+				return results, nil
+			}
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", rawURL, err))
 	}
-	return parseN17KDiscoveryResults(markup, selected.Title, normalizeDiscoveryLimit(limit, 20))
+	return nil, fmt.Errorf("17k discovery ranking %q is unavailable: %w", listTitle, errors.Join(failures...))
 }
 
 func parseN17KDiscoveryResults(markup, listTitle string, limit int) ([]model.SearchResult, error) {
@@ -159,6 +185,9 @@ func parseN17KDiscoveryResults(markup, listTitle string, limit int) ([]model.Sea
 		if len(results) >= limit {
 			break
 		}
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("17k ranking %q has no books", listTitle)
 	}
 	return results, nil
 }

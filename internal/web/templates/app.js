@@ -9,6 +9,17 @@ const versionInfo = window.__NOVEL_DL__.version || { current: "", repo: "", mirr
 const sourceLabelMap = new Map(
   allSources.map((source) => [source.key, source.display_name || source.key]),
 );
+const discoverySiteShortLabels = Object.freeze({
+  qidian: "起点",
+  ciweimao: "刺猬猫",
+  faloo: "飞卢",
+  fanqienovel: "番茄",
+  n17k: "17K",
+  sfacg: "SF轻文",
+  ciyuanji: "次元姬",
+  kadokado: "角角者",
+  alphapolis: "阿尔法",
+});
 let siteWarnings = window.__NOVEL_DL__.siteWarnings || [];
 let siteStats = window.__NOVEL_DL__.siteStats || [];
 const siteWarningPanel = document.getElementById("siteWarningPanel");
@@ -1964,9 +1975,10 @@ function renderDiscoverCatalog() {
     button.className = "discover-site-tab";
     button.classList.toggle("is-active", source.site === discover.activeSite);
     button.setAttribute("aria-pressed", String(source.site === discover.activeSite));
+    button.title = source.name || sourceLabel(source.site);
     const name = document.createElement("span");
     name.className = "discover-site-tab-name";
-    name.textContent = source.name || sourceLabel(source.site);
+    name.textContent = discoverSiteShortLabel(source.site, source.name || sourceLabel(source.site));
     const count = document.createElement("span");
     count.className = "discover-site-tab-count";
     count.textContent = String(listCount);
@@ -1987,6 +1999,11 @@ function renderDiscoverCatalog() {
   lists.forEach((list, index) => {
     discoverListGridNode.appendChild(createDiscoverListCard(activeSource, list, index));
   });
+}
+
+function discoverSiteShortLabel(siteKey, fallback = "") {
+  const key = String(siteKey || "").trim();
+  return discoverySiteShortLabels[key] || fallback || sourceLabel(key);
 }
 
 function createDiscoverListCard(source, list, index) {

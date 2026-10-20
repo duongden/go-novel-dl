@@ -1,6 +1,11 @@
 package site
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestParseN17KDiscoveryResults(t *testing.T) {
 	markup := `<!doctype html>
@@ -55,6 +60,42 @@ func TestParseN17KDiscoveryResults(t *testing.T) {
 	}
 	if results[1].BookID != "3660517" {
 		t.Fatalf("deduplication or ordering failed: %+v", results)
+	}
+}
+
+func TestLoadN17KDiscoveryResultsFallsBackAfter405(t *testing.T) {
+	markup := `<!doctype html>
+<html>
+<body>
+  <div class="TABBOX">
+    <h2 class="tit">推荐票榜</h2>
+    <ul class="BOX Top1">
+      <li><a href="//www.17k.com/book/3669552.html">娘子，我真不想考状元</a></li>
+    </ul>
+  </div>
+</body>
+</html>`
+	calls := make([]string, 0, 2)
+	fetch := func(_ context.Context, rawURL string) (string, error) {
+		calls = append(calls, rawURL)
+		if strings.Contains(rawURL, "from=novel-dl") {
+			return "", errors.New("http 405 for primary ranking URL")
+		}
+		return markup, nil
+	}
+
+	results, err := loadN17KDiscoveryResults(context.Background(), fetch, "推荐票榜", 10)
+	if err != nil {
+		t.Fatalf("load 17k discovery with fallback: %v", err)
+	}
+	if len(results) != 1 || results[0].BookID != "3669552" {
+		t.Fatalf("unexpected fallback results: %+v", results)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected primary and fallback requests, got %v", calls)
+	}
+	if !strings.Contains(calls[0], "from=novel-dl") || !strings.HasSuffix(calls[1], "/top/") {
+		t.Fatalf("unexpected request order: %v", calls)
 	}
 }
 
