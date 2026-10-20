@@ -1879,7 +1879,7 @@ async function ensureDiscoverTrending() {
   discover.trendingPromise = (async () => {
     try {
       const payload = await fetchJSONWithTimeout(
-        `${window.location.origin}${root}/api/discovery/trending?limit=12`,
+        `${window.location.origin}${root}/api/discovery/trending?limit=30`,
         {},
         30000,
         "正在读榜单加载超时，请稍后重试。",

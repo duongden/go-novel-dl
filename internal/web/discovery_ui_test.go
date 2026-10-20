@@ -22,6 +22,7 @@ func TestDiscoverySiteTabsUseChineseShortLabels(t *testing.T) {
 		`kadokado: "角角者"`,
 		`button.title = source.name || sourceLabel(source.site)`,
 		`name.textContent = discoverSiteShortLabel(source.site, source.name || sourceLabel(source.site))`,
+		`api/discovery/trending?limit=30`,
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected discovery tab script to contain %s", needle)
