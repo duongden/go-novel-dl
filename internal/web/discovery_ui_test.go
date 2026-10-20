@@ -20,12 +20,14 @@ func TestDiscoverySiteTabsUseChineseShortLabels(t *testing.T) {
 		`sfacg: "SF轻文"`,
 		`ciyuanji: "次元姬"`,
 		`kadokado: "角角者"`,
-		`alphapolis: "阿尔法"`,
 		`button.title = source.name || sourceLabel(source.site)`,
 		`name.textContent = discoverSiteShortLabel(source.site, source.name || sourceLabel(source.site))`,
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("expected discovery tab script to contain %s", needle)
 		}
+	}
+	if strings.Contains(script, `alphapolis: "阿尔法"`) {
+		t.Fatal("alphapolis must not be exposed as a discovery ranking site")
 	}
 }

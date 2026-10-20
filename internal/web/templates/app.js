@@ -18,7 +18,6 @@ const discoverySiteShortLabels = Object.freeze({
   sfacg: "SF轻文",
   ciyuanji: "次元姬",
   kadokado: "角角者",
-  alphapolis: "阿尔法",
 });
 let siteWarnings = window.__NOVEL_DL__.siteWarnings || [];
 let siteStats = window.__NOVEL_DL__.siteStats || [];

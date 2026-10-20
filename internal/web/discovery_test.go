@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/guohuiyuan/go-novel-dl/internal/config"
 	"github.com/guohuiyuan/go-novel-dl/internal/model"
@@ -20,6 +22,22 @@ type fakeDiscoveryWebSite struct {
 	books    map[string][]model.SearchResult
 	listsErr error
 	booksErr error
+}
+
+type blockingDiscoveryWebSite struct {
+	fakeDiscoveryWebSite
+	started chan<- string
+	release <-chan struct{}
+}
+
+func (s blockingDiscoveryWebSite) DiscoveryBooks(ctx context.Context, _ string, limit int) ([]model.SearchResult, error) {
+	s.started <- s.key
+	select {
+	case <-s.release:
+		return []model.SearchResult{{Site: s.key, BookID: s.key + "-1", Title: s.key}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (s fakeDiscoveryWebSite) DiscoveryLists(ctx context.Context) ([]site.DiscoveryList, error) {
@@ -201,6 +219,98 @@ func TestDiscoveryTrendingInterleavesSites(t *testing.T) {
 	want := []string{"a1", "b1", "a2", "b2"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("expected interleaved books %v, got %v", want, got)
+	}
+}
+
+func TestDiscoveryTrendingRequestsSitesConcurrently(t *testing.T) {
+	service := newTestService()
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	defer unblock()
+
+	for _, key := range []string{"parallel-a", "parallel-b"} {
+		key := key
+		service.Runtime.Registry.Register(key, func(config.ResolvedSiteConfig) site.Site {
+			return blockingDiscoveryWebSite{
+				fakeDiscoveryWebSite: fakeDiscoveryWebSite{
+					fakeWebSite: fakeWebSite{key: key, displayName: key},
+					lists:       []site.DiscoveryList{{ID: "hot", Name: "热门榜", Kind: "ranking"}},
+				},
+				started: started,
+				release: release,
+			}
+		})
+	}
+
+	router := newRouter(service)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, RoutePrefix+"/api/discovery/trending?sites=parallel-a,parallel-b&limit=2", nil)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		done <- resp
+	}()
+
+	for idx := 0; idx < 2; idx++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("discovery requests did not start concurrently")
+		}
+	}
+	unblock()
+
+	select {
+	case resp := <-done:
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("concurrent discovery request did not finish")
+	}
+}
+
+func TestCollectDiscoveryTrendingResultsReturnsPartialAtDeadline(t *testing.T) {
+	results := make(chan discoveryBooksResult, 2)
+	results <- discoveryBooksResult{
+		siteKey: "fast",
+		books:   []model.SearchResult{{Site: "fast", BookID: "1", Title: "快速结果"}},
+	}
+
+	startedAt := time.Now()
+	bySite, warnings := collectDiscoveryTrendingResults(
+		context.Background(),
+		[]string{"fast", "slow"},
+		results,
+		30*time.Millisecond,
+	)
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("partial results took too long: %s", elapsed)
+	}
+	if len(bySite["fast"]) != 1 {
+		t.Fatalf("expected fast site results, got %+v", bySite)
+	}
+	if _, ok := bySite["slow"]; ok {
+		t.Fatalf("slow site should not delay the response: %+v", bySite)
+	}
+	if len(warnings) != 1 || warnings[0].Site != "slow" {
+		t.Fatalf("expected one slow-site warning, got %+v", warnings)
+	}
+}
+
+func TestDefaultDiscoverySitesExcludeAlphapolis(t *testing.T) {
+	sites, explicit := normalizeDiscoverySites(nil)
+	if explicit {
+		t.Fatal("empty site list should use defaults")
+	}
+	for _, siteKey := range sites {
+		if siteKey == "alphapolis" {
+			t.Fatalf("alphapolis must not be included in default discovery sites: %v", sites)
+		}
 	}
 }
 

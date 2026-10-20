@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	discoveryCacheTTL       = 5 * time.Minute
-	discoveryRequestTimeout = 30 * time.Second
+	discoveryCacheTTL               = 5 * time.Minute
+	discoveryRequestTimeout         = 30 * time.Second
+	discoveryTrendingResponseBudget = 6 * time.Second
 )
 
 var defaultDiscoverySiteKeys = []string{
@@ -29,7 +30,6 @@ var defaultDiscoverySiteKeys = []string{
 	"sfacg",
 	"ciyuanji",
 	"kadokado",
-	"alphapolis",
 }
 
 type webDiscoveryCache struct {
@@ -274,11 +274,9 @@ func (s *Service) handleDiscoveryTrending(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), discoveryRequestTimeout)
 	defer cancel()
 	results := make(chan discoveryBooksResult, len(sites))
-	var wg sync.WaitGroup
+	// 每个渠道独立协程抓取，避免单个慢站点阻塞其它推荐结果。
 	for _, siteKey := range sites {
-		wg.Add(1)
 		go func(siteKey string) {
-			defer wg.Done()
 			provider, _, err := s.buildDiscoveryProvider(siteKey)
 			if err != nil {
 				results <- discoveryBooksResult{siteKey: siteKey, err: err}
@@ -304,24 +302,59 @@ func (s *Service) handleDiscoveryTrending(c *gin.Context) {
 			results <- discoveryBooksResult{siteKey: siteKey, books: books, err: err}
 		}(siteKey)
 	}
-	wg.Wait()
-	close(results)
-
-	bySite := make(map[string][]model.SearchResult, len(sites))
-	warnings := make([]app.SearchWarning, 0)
-	for result := range results {
-		if result.err != nil {
-			if !isDiscoveryProviderUnavailable(result.err) {
-				warnings = append(warnings, app.SearchWarning{Site: result.siteKey, Error: result.err.Error()})
-			}
-			continue
-		}
-		bySite[result.siteKey] = result.books
-	}
+	bySite, warnings := collectDiscoveryTrendingResults(ctx, sites, results, discoveryTrendingResponseBudget)
 	books := interleaveDiscoveryBooks(sites, bySite, limit)
 	response := discoveryTrendingResponse{Books: books, Warnings: warnings}
 	s.getDiscoveryCache().set(cacheKey, response, discoveryCacheTTL)
 	c.JSON(http.StatusOK, response)
+}
+
+func collectDiscoveryTrendingResults(
+	ctx context.Context,
+	sites []string,
+	results <-chan discoveryBooksResult,
+	budget time.Duration,
+) (map[string][]model.SearchResult, []app.SearchWarning) {
+	bySite := make(map[string][]model.SearchResult, len(sites))
+	warnings := make([]app.SearchWarning, 0)
+	pending := make(map[string]struct{}, len(sites))
+	for _, siteKey := range sites {
+		pending[siteKey] = struct{}{}
+	}
+	appendPendingWarnings := func(message string) {
+		for _, siteKey := range sites {
+			if _, ok := pending[siteKey]; !ok {
+				continue
+			}
+			warnings = append(warnings, app.SearchWarning{Site: siteKey, Error: message})
+		}
+	}
+
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	for len(pending) > 0 {
+		select {
+		case result := <-results:
+			if _, ok := pending[result.siteKey]; !ok {
+				continue
+			}
+			delete(pending, result.siteKey)
+			if result.err != nil {
+				if !isDiscoveryProviderUnavailable(result.err) {
+					warnings = append(warnings, app.SearchWarning{Site: result.siteKey, Error: result.err.Error()})
+				}
+				continue
+			}
+			bySite[result.siteKey] = result.books
+		case <-timer.C:
+			appendPendingWarnings("推荐请求超过响应时限")
+			return bySite, warnings
+		case <-ctx.Done():
+			appendPendingWarnings(ctx.Err().Error())
+			return bySite, warnings
+		}
+	}
+	return bySite, warnings
 }
 
 func (s *Service) buildDiscoveryProvider(siteKey string) (site.DiscoveryProvider, site.Site, error) {
