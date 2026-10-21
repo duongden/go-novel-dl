@@ -302,14 +302,14 @@ func TestCollectDiscoveryTrendingResultsReturnsPartialAtDeadline(t *testing.T) {
 	}
 }
 
-func TestDefaultDiscoverySitesExcludeAlphapolis(t *testing.T) {
+func TestDefaultDiscoverySitesExcludeUnavailableChannels(t *testing.T) {
 	sites, explicit := normalizeDiscoverySites(nil)
 	if explicit {
 		t.Fatal("empty site list should use defaults")
 	}
 	for _, siteKey := range sites {
-		if siteKey == "alphapolis" {
-			t.Fatalf("alphapolis must not be included in default discovery sites: %v", sites)
+		if siteKey == "alphapolis" || siteKey == "kadokado" {
+			t.Fatalf("%s must not be included in default discovery sites: %v", siteKey, sites)
 		}
 	}
 }

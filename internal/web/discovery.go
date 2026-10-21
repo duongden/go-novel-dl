@@ -29,7 +29,6 @@ var defaultDiscoverySiteKeys = []string{
 	"n17k",
 	"sfacg",
 	"ciyuanji",
-	"kadokado",
 }
 
 type webDiscoveryCache struct {
