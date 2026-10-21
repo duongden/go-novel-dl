@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,14 +13,17 @@ import (
 )
 
 type n17kDiscoverySpec struct {
-	List  DiscoveryList
-	Title string
+	List     DiscoveryList
+	Title    string
+	RankType int
 }
 
 var n17kDiscoverySpecs = []n17kDiscoverySpec{
 	{
 		List:  DiscoveryList{ID: "recommend-votes", Name: "推荐票榜", Description: "本周获得读者推荐票最多的作品", Kind: "ranking", UpdateFrequency: "实时更新"},
 		Title: "推荐票榜",
+		// 17K 的全量榜单页也使用 14_recommend，H5 rank 接口的 type=14 与之对应。
+		RankType: 14,
 	},
 	{
 		List:  DiscoveryList{ID: "best-sellers", Name: "畅销榜", Description: "17K 近期畅销作品排行", Kind: "ranking", UpdateFrequency: "实时更新"},
@@ -48,6 +52,8 @@ var n17kDiscoveryURLs = []string{
 	"https://www.17k.com/top/",
 }
 
+const n17kDiscoveryRankAPI = "https://h5.17k.com/ck/book/rank?appKey=1351550300"
+
 var _ DiscoveryProvider = (*N17KSite)(nil)
 
 func (s *N17KSite) DiscoveryLists(ctx context.Context) ([]DiscoveryList, error) {
@@ -74,16 +80,31 @@ func (s *N17KSite) DiscoveryBooks(ctx context.Context, listID string, limit int)
 		return nil, fmt.Errorf("n17k discovery list %q not found", listID)
 	}
 
-	return loadN17KDiscoveryResults(ctx, s.fetch, selected.Title, normalizeDiscoveryLimit(limit, 20))
+	return loadN17KDiscoveryResults(ctx, s.fetch, *selected, normalizeDiscoveryLimit(limit, 20))
 }
 
 func loadN17KDiscoveryResults(
 	ctx context.Context,
 	fetch func(context.Context, string) (string, error),
-	listTitle string,
+	spec n17kDiscoverySpec,
 	limit int,
 ) ([]model.SearchResult, error) {
-	failures := make([]error, 0, len(n17kDiscoveryURLs))
+	failures := make([]error, 0, len(n17kDiscoveryURLs)+1)
+	if spec.RankType > 0 {
+		apiURL := fmt.Sprintf("%s&type=%d", n17kDiscoveryRankAPI, spec.RankType)
+		markup, err := fetch(ctx, apiURL)
+		if err == nil {
+			var results []model.SearchResult
+			results, err = parseN17KDiscoveryAPIResults(markup, limit)
+			if err == nil {
+				return results, nil
+			}
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", apiURL, err))
+	}
 	for _, rawURL := range n17kDiscoveryURLs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -91,14 +112,80 @@ func loadN17KDiscoveryResults(
 		markup, err := fetch(ctx, rawURL)
 		if err == nil {
 			var results []model.SearchResult
-			results, err = parseN17KDiscoveryResults(markup, listTitle, limit)
+			results, err = parseN17KDiscoveryResults(markup, spec.Title, limit)
 			if err == nil {
 				return results, nil
 			}
 		}
 		failures = append(failures, fmt.Errorf("%s: %w", rawURL, err))
 	}
-	return nil, fmt.Errorf("17k discovery ranking %q is unavailable: %w", listTitle, errors.Join(failures...))
+	return nil, fmt.Errorf("17k discovery ranking %q is unavailable: %w", spec.Title, errors.Join(failures...))
+}
+
+type n17kDiscoveryAPIResponse struct {
+	Status struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	} `json:"status"`
+	Data []struct {
+		ID             int64  `json:"id"`
+		BookName       string `json:"bookName"`
+		AuthorPenName  string `json:"authorPenName"`
+		Introduction   string `json:"introduction"`
+		CategoryName   string `json:"categoryName"`
+		CoverImg       string `json:"coverImg"`
+		WeekMemberPV   int64  `json:"weekMemberPv"`
+		WeekGiftAmount int64  `json:"weekGiftAmount"`
+	} `json:"data"`
+}
+
+func parseN17KDiscoveryAPIResults(payload string, limit int) ([]model.SearchResult, error) {
+	if strings.Contains(payload, "aliyun_waf") {
+		return nil, errors.New("17k ranking api returned a waf challenge")
+	}
+	var response n17kDiscoveryAPIResponse
+	if err := json.Unmarshal([]byte(payload), &response); err != nil {
+		return nil, fmt.Errorf("decode 17k ranking api: %w", err)
+	}
+	if response.Status.Code != 0 {
+		return nil, fmt.Errorf("17k ranking api status %d: %s", response.Status.Code, cleanText(response.Status.Msg))
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	results := make([]model.SearchResult, 0, min(limit, len(response.Data)))
+	seen := make(map[string]struct{}, min(limit, len(response.Data)))
+	for _, item := range response.Data {
+		bookID := fmt.Sprintf("%d", item.ID)
+		if item.ID <= 0 {
+			continue
+		}
+		if _, ok := seen[bookID]; ok {
+			continue
+		}
+		title := cleanText(item.BookName)
+		if title == "" {
+			continue
+		}
+		seen[bookID] = struct{}{}
+		results = append(results, model.SearchResult{
+			Site:        "n17k",
+			BookID:      bookID,
+			Title:       title,
+			Author:      cleanText(item.AuthorPenName),
+			Description: firstNonEmptyString(cleanText(item.Introduction), cleanText(item.CategoryName)),
+			URL:         "https://www.17k.com/book/" + bookID + ".html",
+			CoverURL:    absolutizeURL("https://www.17k.com", item.CoverImg),
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	if len(results) == 0 {
+		return nil, errors.New("17k ranking api has no books")
+	}
+	return results, nil
 }
 
 func parseN17KDiscoveryResults(markup, listTitle string, limit int) ([]model.SearchResult, error) {

@@ -63,7 +63,91 @@ func TestParseN17KDiscoveryResults(t *testing.T) {
 	}
 }
 
-func TestLoadN17KDiscoveryResultsFallsBackAfter405(t *testing.T) {
+func TestParseN17KDiscoveryAPIResults(t *testing.T) {
+	payload := `{
+  "status": {"code": 0, "msg": "succ"},
+  "data": [
+    {
+      "id": 3597196,
+      "bookName": "太上无情",
+      "authorPenName": "风青阳",
+      "introduction": "受人闻疾苦窥悟仙道",
+      "categoryName": "仙侠",
+      "coverImg": "//cdn.example/cover.jpg"
+    },
+    {
+      "id": 3597196,
+      "bookName": "重复作品"
+    },
+    {
+      "id": 3660517,
+      "bookName": "脑子里长了个电视机",
+      "authorPenName": "另一位作者",
+      "coverImg": "https://cdn.example/cover-2.jpg"
+    }
+  ]
+}`
+	results, err := parseN17KDiscoveryAPIResults(payload, 2)
+	if err != nil {
+		t.Fatalf("parse 17k ranking API: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two results, got %d", len(results))
+	}
+	first := results[0]
+	if first.Site != "n17k" || first.BookID != "3597196" || first.Title != "太上无情" {
+		t.Fatalf("unexpected first result: %+v", first)
+	}
+	if first.Author != "风青阳" || first.Description != "受人闻疾苦窥悟仙道" {
+		t.Fatalf("unexpected metadata: %+v", first)
+	}
+	if first.CoverURL != "https://cdn.example/cover.jpg" {
+		t.Fatalf("unexpected protocol-relative cover: %q", first.CoverURL)
+	}
+	if results[1].BookID != "3660517" {
+		t.Fatalf("deduplication or ordering failed: %+v", results)
+	}
+}
+
+func TestParseN17KDiscoveryAPIResultsRejectsChallengeAndAPIError(t *testing.T) {
+	if _, err := parseN17KDiscoveryAPIResults(`<html><meta name="aliyun_waf_aa"></html>`, 20); err == nil {
+		t.Fatal("expected WAF challenge to be rejected")
+	}
+	if _, err := parseN17KDiscoveryAPIResults(`{"status":{"code":401,"msg":"未登录"},"data":[]}`, 20); err == nil {
+		t.Fatal("expected non-zero API status to be rejected")
+	}
+}
+
+func TestLoadN17KDiscoveryResultsUsesAPIWhenHTMLReturns405(t *testing.T) {
+	apiPayload := `{
+  "status": {"code": 0, "msg": "succ"},
+  "data": [
+    {"id":3597196,"bookName":"太上无情","authorPenName":"风青阳"},
+    {"id":3583700,"bookName":"星痕之门","authorPenName":"伪戒"}
+  ]
+}`
+	calls := make([]string, 0, 2)
+	fetch := func(_ context.Context, rawURL string) (string, error) {
+		calls = append(calls, rawURL)
+		if strings.Contains(rawURL, "/ck/book/rank") {
+			return apiPayload, nil
+		}
+		return "", errors.New("http 405")
+	}
+
+	results, err := loadN17KDiscoveryResults(context.Background(), fetch, n17kDiscoverySpecs[0], 10)
+	if err != nil {
+		t.Fatalf("load 17k discovery from API: %v", err)
+	}
+	if len(results) != 2 || results[0].BookID != "3597196" || results[1].BookID != "3583700" {
+		t.Fatalf("unexpected API results: %+v", results)
+	}
+	if len(calls) != 1 || !strings.Contains(calls[0], "type=14") {
+		t.Fatalf("expected one type=14 API request, got %v", calls)
+	}
+}
+
+func TestLoadN17KDiscoveryResultsFallsBackToHTMLAfterAPIError(t *testing.T) {
 	markup := `<!doctype html>
 <html>
 <body>
@@ -78,23 +162,26 @@ func TestLoadN17KDiscoveryResultsFallsBackAfter405(t *testing.T) {
 	calls := make([]string, 0, 2)
 	fetch := func(_ context.Context, rawURL string) (string, error) {
 		calls = append(calls, rawURL)
+		if strings.Contains(rawURL, "/ck/book/rank") {
+			return "", errors.New("http 405 for ranking API")
+		}
 		if strings.Contains(rawURL, "from=novel-dl") {
 			return "", errors.New("http 405 for primary ranking URL")
 		}
 		return markup, nil
 	}
 
-	results, err := loadN17KDiscoveryResults(context.Background(), fetch, "推荐票榜", 10)
+	results, err := loadN17KDiscoveryResults(context.Background(), fetch, n17kDiscoverySpecs[0], 10)
 	if err != nil {
 		t.Fatalf("load 17k discovery with fallback: %v", err)
 	}
 	if len(results) != 1 || results[0].BookID != "3669552" {
 		t.Fatalf("unexpected fallback results: %+v", results)
 	}
-	if len(calls) != 2 {
-		t.Fatalf("expected primary and fallback requests, got %v", calls)
+	if len(calls) != 3 {
+		t.Fatalf("expected API and both HTML requests, got %v", calls)
 	}
-	if !strings.Contains(calls[0], "from=novel-dl") || !strings.HasSuffix(calls[1], "/top/") {
+	if !strings.Contains(calls[0], "type=14") || !strings.Contains(calls[1], "from=novel-dl") || !strings.HasSuffix(calls[2], "/top/") {
 		t.Fatalf("unexpected request order: %v", calls)
 	}
 }
