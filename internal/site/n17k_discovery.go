@@ -48,7 +48,6 @@ var n17kDiscoverySpecs = []n17kDiscoverySpec{
 }
 
 var n17kDiscoveryURLs = []string{
-	"https://www.17k.com/top/?from=novel-dl",
 	"https://www.17k.com/top/",
 }
 
@@ -80,7 +79,7 @@ func (s *N17KSite) DiscoveryBooks(ctx context.Context, listID string, limit int)
 		return nil, fmt.Errorf("n17k discovery list %q not found", listID)
 	}
 
-	return loadN17KDiscoveryResults(ctx, s.fetch, *selected, normalizeDiscoveryLimit(limit, 20))
+	return loadN17KDiscoveryResults(ctx, s.fetchAPI, *selected, normalizeDiscoveryLimit(limit, 20))
 }
 
 func loadN17KDiscoveryResults(
@@ -140,7 +139,7 @@ type n17kDiscoveryAPIResponse struct {
 }
 
 func parseN17KDiscoveryAPIResults(payload string, limit int) ([]model.SearchResult, error) {
-	if strings.Contains(payload, "aliyun_waf") {
+	if n17kLooksLikeWAFChallenge(payload) {
 		return nil, errors.New("17k ranking api returned a waf challenge")
 	}
 	var response n17kDiscoveryAPIResponse

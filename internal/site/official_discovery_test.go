@@ -113,6 +113,9 @@ func TestParseN17KDiscoveryAPIResultsRejectsChallengeAndAPIError(t *testing.T) {
 	if _, err := parseN17KDiscoveryAPIResults(`<html><meta name="aliyun_waf_aa"></html>`, 20); err == nil {
 		t.Fatal("expected WAF challenge to be rejected")
 	}
+	if _, err := parseN17KDiscoveryAPIResults(`<script>var arg1 = '0123456789ABCDEF';</script>`, 20); err == nil {
+		t.Fatal("expected legacy WAF challenge to be rejected")
+	}
 	if _, err := parseN17KDiscoveryAPIResults(`{"status":{"code":401,"msg":"未登录"},"data":[]}`, 20); err == nil {
 		t.Fatal("expected non-zero API status to be rejected")
 	}
@@ -165,9 +168,6 @@ func TestLoadN17KDiscoveryResultsFallsBackToHTMLAfterAPIError(t *testing.T) {
 		if strings.Contains(rawURL, "/ck/book/rank") {
 			return "", errors.New("http 405 for ranking API")
 		}
-		if strings.Contains(rawURL, "from=novel-dl") {
-			return "", errors.New("http 405 for primary ranking URL")
-		}
 		return markup, nil
 	}
 
@@ -178,10 +178,10 @@ func TestLoadN17KDiscoveryResultsFallsBackToHTMLAfterAPIError(t *testing.T) {
 	if len(results) != 1 || results[0].BookID != "3669552" {
 		t.Fatalf("unexpected fallback results: %+v", results)
 	}
-	if len(calls) != 3 {
-		t.Fatalf("expected API and both HTML requests, got %v", calls)
+	if len(calls) != 2 {
+		t.Fatalf("expected API and HTML fallback requests, got %v", calls)
 	}
-	if !strings.Contains(calls[0], "type=14") || !strings.Contains(calls[1], "from=novel-dl") || !strings.HasSuffix(calls[2], "/top/") {
+	if !strings.Contains(calls[0], "type=14") || !strings.HasSuffix(calls[1], "/top/") {
 		t.Fatalf("unexpected request order: %v", calls)
 	}
 }

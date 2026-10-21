@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -233,13 +234,21 @@ func (s *N17KSite) Search(ctx context.Context, keyword string, limit int) ([]mod
 		return nil, nil
 	}
 
+	results, apiErr := loadN17KSearchResults(ctx, s.fetchAPI, keyword, limit)
+	if apiErr == nil {
+		return results, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+
 	markup, err := s.fetch(ctx, "https://search.17k.com/search.xhtml?c.st=0&c.q="+url.QueryEscape(keyword))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("17k search unavailable: %w", errors.Join(apiErr, err))
 	}
-	results, err := parseN17KSearchResults(markup)
+	results, err = parseN17KSearchResults(markup)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("17k search unavailable: %w", errors.Join(apiErr, err))
 	}
 	if limit > 0 && len(results) > limit {
 		results = results[:limit]
@@ -341,12 +350,26 @@ func n17KSearchBookID(raw string) string {
 }
 
 func (s *N17KSite) fetch(ctx context.Context, rawURL string) (string, error) {
-	markup, err := s.getWithRetry(ctx, rawURL)
+	return s.fetchWithHeaders(ctx, rawURL, nil)
+}
+
+func (s *N17KSite) fetchAPI(ctx context.Context, rawURL string) (string, error) {
+	return s.fetchWithHeaders(ctx, rawURL, map[string]string{
+		"Accept":  "application/json, text/plain, */*",
+		"Referer": "https://h5.17k.com/",
+	})
+}
+
+func (s *N17KSite) fetchWithHeaders(ctx context.Context, rawURL string, headers map[string]string) (string, error) {
+	markup, err := s.getWithRetryHeaders(ctx, rawURL, headers)
 	if err != nil {
 		return "", err
 	}
 	match := n17kArg1Re.FindStringSubmatch(markup)
 	if len(match) != 2 {
+		if n17kLooksLikeWAFChallenge(markup) {
+			return "", errors.New("17k returned a WAF challenge")
+		}
 		return markup, nil
 	}
 	reordered := reorderN17KArg(match[1])
@@ -355,13 +378,27 @@ func (s *N17KSite) fetch(ctx context.Context, rawURL string) (string, error) {
 	if parsed != nil {
 		s.client.Jar.SetCookies(parsed, []*http.Cookie{{Name: "acw_sc__v2", Value: arg2, Path: "/", Domain: ".17k.com"}})
 	}
-	return s.getWithRetry(ctx, rawURL)
+	markup, err = s.getWithRetryHeaders(ctx, rawURL, headers)
+	if err != nil {
+		return "", err
+	}
+	if n17kLooksLikeWAFChallenge(markup) {
+		return "", errors.New("17k returned a WAF challenge")
+	}
+	return markup, nil
 }
 
-func (s *N17KSite) getWithRetry(ctx context.Context, rawURL string) (string, error) {
+func (s *N17KSite) getWithRetryHeaders(ctx context.Context, rawURL string, headers map[string]string) (string, error) {
 	return getWithSiteRetry(ctx, func() (string, error) {
-		return s.html.Get(ctx, rawURL)
+		return s.html.GetWithHeaders(ctx, rawURL, headers)
 	}, defaultSiteRetryAttempts)
+}
+
+func n17kLooksLikeWAFChallenge(payload string) bool {
+	lower := strings.ToLower(payload)
+	return n17kArg1Re.MatchString(payload) ||
+		strings.Contains(lower, "aliyun_waf_aa") ||
+		(strings.Contains(lower, "<html") && strings.Contains(lower, "renderdata"))
 }
 
 func seedN17KCookies(client *http.Client) {
