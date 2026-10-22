@@ -1,7 +1,7 @@
 const root = window.__NOVEL_DL__.root;
 const defaultSources = window.__NOVEL_DL__.defaultSources || [];
 const allSources = window.__NOVEL_DL__.allSources || [];
-const configurableSiteKeys = ["novalpie", "esjzone", "wenku8"];
+const configurableSiteKeys = ["novalpie", "esjzone", "wenku8", "qqreader"];
 const defaultPageSize = window.__NOVEL_DL__.pageSize || 50;
 const initialGeneralConfig = window.__NOVEL_DL__.generalConfig || {};
 const initialPageSize = normalizeSearchPageSize((initialGeneralConfig && initialGeneralConfig.web_page_size) || defaultPageSize, defaultPageSize);
@@ -11,6 +11,7 @@ const sourceLabelMap = new Map(
 );
 const discoverySiteShortLabels = Object.freeze({
   qidian: "起点",
+  qqreader: "QQ阅读",
   ciweimao: "刺猬猫",
   faloo: "飞卢",
   fanqienovel: "番茄",

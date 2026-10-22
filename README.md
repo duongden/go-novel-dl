@@ -405,6 +405,7 @@ n69shuba
 n8novel
 novalpie
 novelpia
+qqreader
 ruochu
 sfacg
 shencou
@@ -447,6 +448,7 @@ kadokado
 haiwaishubao
 mjyhb
 novelpia
+qqreader
 ltxswu
 ```
 
@@ -492,6 +494,7 @@ n17k
 n8novel
 novalpie
 novelpia
+qqreader
 ruochu
 sfacg
 shuhaige
@@ -524,6 +527,7 @@ novalpie
 ```
 
 ESJ Zone 搜索和详情无需预先登录；只有遇到需要认证的章节时才可能需要 Cookie/账号。
+QQ 阅读的免费章节可直接下载；会员或已购章节需要把有权访问该书的 QQ Cookie 配置到 `qqreader` 渠道。
 
 ### 可在配置中心管理的站点
 
@@ -552,6 +556,7 @@ ciweimao
 kadokado
 novalpie
 novelpia
+qqreader
 haiwaishubao
 mjyhb
 n17k

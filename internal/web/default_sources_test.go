@@ -42,7 +42,7 @@ func TestDefaultWebMetaIncludesNewSearchSources(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode meta payload: %v", err)
 	}
-	for _, siteKey := range []string{"qidian"} {
+	for _, siteKey := range []string{"qidian", "qqreader"} {
 		if findDescriptor(payload.DefaultSources, siteKey) == nil {
 			t.Fatalf("expected %s in default web search sources", siteKey)
 		}

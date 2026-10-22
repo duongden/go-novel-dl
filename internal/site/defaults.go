@@ -21,6 +21,7 @@ var defaultAvailableSiteKeys = []string{
 	"biquge5",
 	"ciweimao",
 	"qidian",
+	"qqreader",
 	"faloo",
 	"linovelib",
 	"buguxs",

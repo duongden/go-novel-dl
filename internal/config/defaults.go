@@ -144,6 +144,9 @@ func DefaultConfig() Config {
 			"qidian": {
 				BookIDs: []model.BookRef{{BookID: "1010868264"}},
 			},
+			"qqreader": {
+				BookIDs: []model.BookRef{{BookID: "621674"}},
+			},
 			"faloo": {
 				BookIDs: []model.BookRef{{BookID: "1482723"}},
 			},

@@ -60,6 +60,10 @@ var siteMetadata = map[string]SiteMetadata{
 		Title: "起点中文网",
 		Tags:  []string{"原创", "阅文"},
 	},
+	"qqreader": {
+		Title: "QQ阅读",
+		Tags:  []string{"原创", "付费", "阅文"},
+	},
 	"fsshu": {
 		Title: "笔趣阁",
 		Tags:  []string{"网络小说", "笔趣阁"},
