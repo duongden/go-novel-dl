@@ -467,7 +467,18 @@ h3 { font-size: 14px; font-weight: 700; color: #334155; }
   display: inline-flex; align-items: center; min-height: 20px; padding: 0 6px; border-radius: 4px;
   border: 1px solid var(--line); background: #f8fafc; color: var(--muted); font-size: 11px;
 }
+.source-option-tag.is-capability {
+  border-color: rgba(14, 116, 144, 0.24);
+  background: rgba(14, 165, 233, 0.1);
+  color: #0369a1;
+  font-weight: 700;
+}
 .source-option.is-selected .source-option-tag { border-color: var(--accent-soft); background: #fff; color: var(--accent-deep); }
+.source-option.is-selected .source-option-tag.is-capability {
+  border-color: rgba(14, 116, 144, 0.28);
+  background: rgba(14, 165, 233, 0.12);
+  color: #075985;
+}
 
 .source-option-speed {
   display: inline-flex; align-items: center; min-height: 20px; padding: 0 6px;
@@ -2060,6 +2071,12 @@ html[data-app-theme] .source-option.is-selected .source-option-tag {
   background: var(--bg-soft);
   border-color: var(--line);
   color: var(--muted);
+}
+html[data-app-theme] .source-option-tag.is-capability,
+html[data-app-theme] .source-option.is-selected .source-option-tag.is-capability {
+  background: color-mix(in srgb, #0ea5e9 14%, var(--card-strong));
+  border-color: color-mix(in srgb, #0ea5e9 36%, var(--line));
+  color: color-mix(in srgb, #0ea5e9 68%, var(--text));
 }
 html[data-app-theme] .detail-book-tag {
   color: var(--accent-deep);

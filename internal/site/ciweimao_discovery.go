@@ -23,17 +23,19 @@ var ciweimaoDiscoveryLists = []DiscoveryList{
 	{
 		ID:              "booklist:27872",
 		Name:            "精品力荐 1",
-		Description:     "刺猬猫官方整理的作品精选书单",
+		Description:     "刺猬猫源站公开的官方精选书单，当前收录 4 本",
 		Kind:            "booklist",
 		CoverURL:        "https://e2.kuangxiangit.com/novel/img_index_recommend/booklist/20211028032240935.jpg",
 		UpdateFrequency: "官方书单",
+		BookCount:       4,
 	},
 	{
 		ID:              "booklist:27873",
 		Name:            "好书精选 1",
-		Description:     "刺猬猫官方整理的高口碑作品书单",
+		Description:     "刺猬猫源站公开的官方精选书单，当前收录 4 本",
 		Kind:            "booklist",
 		UpdateFrequency: "官方书单",
+		BookCount:       4,
 	},
 }
 

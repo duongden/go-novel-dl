@@ -216,6 +216,119 @@ var qqReaderBooklistSpecs = []qqReaderBooklistSpec{
 	},
 }
 
+var qqReaderExtraBooklistSpecs = []qqReaderBooklistSpec{
+	{
+		TagIDs: []int{9000718},
+		List: DiscoveryList{
+			ID:              "booklist-single-heroine",
+			Name:            "单女主",
+			Description:     "单女主、感情线清晰的作品书单",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000719},
+		List: DiscoveryList{
+			ID:              "booklist-underdog",
+			Name:            "扮猪吃虎",
+			Description:     "主角隐忍发展后实力压制的作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000729},
+		List: DiscoveryList{
+			ID:              "booklist-multiple-heroines",
+			Name:            "多女主",
+			Description:     "多女主群像与羁绊剧情作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000730},
+		List: DiscoveryList{
+			ID:              "booklist-acg",
+			Name:            "二次元",
+			Description:     "二次元、轻小说与动漫同人相关作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000735},
+		List: DiscoveryList{
+			ID:              "booklist-mortal",
+			Name:            "凡人流",
+			Description:     "平民流修仙与长期成长作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000736},
+		List: DiscoveryList{
+			ID:              "booklist-anti-routine",
+			Name:            "反套路",
+			Description:     "反套路剧情与意想不到的展开",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000737},
+		List: DiscoveryList{
+			ID:              "booklist-weak-to-strong",
+			Name:            "废柴流",
+			Description:     "废柴开局、逆袭成长的作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000738},
+		List: DiscoveryList{
+			ID:              "booklist-fengshen",
+			Name:            "封神",
+			Description:     "封神与上古世界题材作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000739},
+		List: DiscoveryList{
+			ID:              "booklist-high-martial",
+			Name:            "高武",
+			Description:     "高武与现代武力体系作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000740},
+		List: DiscoveryList{
+			ID:              "booklist-comedy",
+			Name:            "搞笑",
+			Description:     "轻松搞笑、适合日常阅读的作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+	{
+		TagIDs: []int{9000741},
+		List: DiscoveryList{
+			ID:              "booklist-palace",
+			Name:            "宫斗宅斗",
+			Description:     "古风宫斗、宅斗与家族羁绊作品",
+			Kind:            "booklist",
+			UpdateFrequency: "持续更新",
+		},
+	},
+}
+
 type qqReaderDiscoveryBook struct {
 	BookID     int64  `json:"bid"`
 	Title      string `json:"title"`
@@ -238,8 +351,11 @@ type qqReaderBooklistEnvelope struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 	Data struct {
-		TagName string `json:"tagName"`
-		List    []struct {
+		TagName   string `json:"tagName"`
+		NextPage  bool   `json:"nextPage"`
+		TotalPage int    `json:"totalPage"`
+		List      []struct {
+			BookInfo     qqReaderDiscoveryBook   `json:"bookInfo"`
 			RelatedBooks []qqReaderDiscoveryBook `json:"relatedBooks"`
 		} `json:"list"`
 	} `json:"data"`
@@ -251,11 +367,12 @@ func (s *QQReaderSite) DiscoveryLists(ctx context.Context) ([]DiscoveryList, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	lists := make([]DiscoveryList, 0, len(qqReaderRankingSpecs)+len(qqReaderBooklistSpecs))
+	booklistSpecs := qqReaderAllBooklistSpecs()
+	lists := make([]DiscoveryList, 0, len(qqReaderRankingSpecs)+len(booklistSpecs))
 	for _, item := range qqReaderRankingSpecs {
 		lists = append(lists, item.List)
 	}
-	for _, item := range qqReaderBooklistSpecs {
+	for _, item := range booklistSpecs {
 		lists = append(lists, item.List)
 	}
 	return cloneDiscoveryLists(lists), nil
@@ -268,12 +385,19 @@ func (s *QQReaderSite) DiscoveryBooks(ctx context.Context, listID string, limit 
 			return s.fetchQQReaderRanking(ctx, item, normalizeDiscoveryLimit(limit, 20))
 		}
 	}
-	for _, item := range qqReaderBooklistSpecs {
+	for _, item := range qqReaderAllBooklistSpecs() {
 		if item.List.ID == listID {
 			return s.fetchQQReaderBooklist(ctx, item, normalizeDiscoveryLimit(limit, 20))
 		}
 	}
 	return nil, fmt.Errorf("qqreader discovery list %q not found", listID)
+}
+
+func qqReaderAllBooklistSpecs() []qqReaderBooklistSpec {
+	items := make([]qqReaderBooklistSpec, 0, len(qqReaderBooklistSpecs)+len(qqReaderExtraBooklistSpecs))
+	items = append(items, qqReaderBooklistSpecs...)
+	items = append(items, qqReaderExtraBooklistSpecs...)
+	return items
 }
 
 func (s *QQReaderSite) fetchQQReaderRanking(
@@ -322,31 +446,44 @@ func (s *QQReaderSite) fetchQQReaderBooklist(
 	seen := make(map[string]struct{}, limit)
 	var firstErr error
 	for _, tagID := range spec.TagIDs {
-		endpoint := url.Values{}
-		endpoint.Set("tagId", strconv.Itoa(tagID))
-		endpoint.Set("pageNo", "1")
-		endpoint.Set("pageSize", strconv.Itoa(limit))
-		rawURL := qqReaderBaseURL + "/api/site/seo/new/book/list?" + endpoint.Encode()
+		for pageNo := 1; len(results) < limit; pageNo++ {
+			endpoint := url.Values{}
+			endpoint.Set("tagId", strconv.Itoa(tagID))
+			endpoint.Set("pageNo", strconv.Itoa(pageNo))
+			endpoint.Set("pageSize", "10")
+			rawURL := qqReaderBaseURL + "/api/site/seo/new/book/list?" + endpoint.Encode()
 
-		var envelope qqReaderBooklistEnvelope
-		if err := s.getJSON(ctx, rawURL, &envelope); err != nil {
-			if firstErr == nil {
-				firstErr = err
+			var envelope qqReaderBooklistEnvelope
+			if err := s.getJSON(ctx, rawURL, &envelope); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				break
 			}
-			continue
-		}
-		if err := qqReaderEnvelopeError("booklist", strconv.Itoa(tagID), envelope.Code, envelope.Msg); err != nil {
-			if firstErr == nil {
-				firstErr = err
+			if err := qqReaderEnvelopeError("booklist", strconv.Itoa(tagID), envelope.Code, envelope.Msg); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				break
 			}
-			continue
-		}
-		for _, group := range envelope.Data.List {
-			for _, item := range group.RelatedBooks {
-				appendQQReaderDiscoveryBook(&results, seen, item)
+			if len(envelope.Data.List) == 0 {
+				break
+			}
+			before := len(results)
+			for _, group := range envelope.Data.List {
+				appendQQReaderDiscoveryBook(&results, seen, group.BookInfo)
 				if len(results) >= limit {
 					return results, nil
 				}
+				for _, item := range group.RelatedBooks {
+					appendQQReaderDiscoveryBook(&results, seen, item)
+					if len(results) >= limit {
+						return results, nil
+					}
+				}
+			}
+			if len(results) == before || !envelope.Data.NextPage || envelope.Data.TotalPage <= pageNo {
+				break
 			}
 		}
 	}

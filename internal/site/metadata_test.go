@@ -10,6 +10,7 @@ func TestActiveSiteMetadataProvidesCuratedDefaultTags(t *testing.T) {
 		"网络小说": {}, "轻小说": {}, "经典图书": {}, "二次元": {}, "同人二创": {}, "翻译": {},
 		"男性向": {}, "女性向": {}, "成人向": {},
 		"笔趣阁": {}, "起点": {}, "阅文": {}, "飞卢": {}, "番茄小说": {},
+		"出版物": {}, "正版": {},
 	}
 
 	for _, key := range registry.Keys() {

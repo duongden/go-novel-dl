@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -28,11 +29,35 @@ func (s *QidianSite) DiscoveryLists(ctx context.Context) ([]DiscoveryList, error
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return cloneDiscoveryLists(qidianDiscoveryLists), nil
+	lists := append([]DiscoveryList(nil), qidianDiscoveryLists...)
+	markup, err := s.fetchQidianHTML(
+		ctx,
+		"https://m.qidian.com/booklist/",
+		qidianMobileHeaders("https://m.qidian.com/"),
+	)
+	if err == nil {
+		lists = append(lists, parseQidianBooklistCatalog(markup)...)
+	}
+	return cloneDiscoveryLists(lists), nil
 }
 
 func (s *QidianSite) DiscoveryBooks(ctx context.Context, listID string, limit int) ([]model.SearchResult, error) {
 	listID = strings.TrimSpace(listID)
+	if booklistID, ok := strings.CutPrefix(listID, "booklist:"); ok {
+		booklistID = strings.TrimSpace(booklistID)
+		if booklistID == "" {
+			return nil, fmt.Errorf("qidian booklist id is empty")
+		}
+		markup, err := s.fetchQidianHTML(
+			ctx,
+			"https://m.qidian.com/booklist/detail/"+booklistID+"/",
+			qidianMobileHeaders("https://m.qidian.com/booklist/"),
+		)
+		if err != nil {
+			return nil, err
+		}
+		return parseQidianBooklistBooks(markup, normalizeDiscoveryLimit(limit, 20))
+	}
 	known := false
 	for _, item := range qidianDiscoveryLists {
 		if item.ID == listID {
@@ -50,6 +75,172 @@ func (s *QidianSite) DiscoveryBooks(ctx context.Context, listID string, limit in
 		return nil, err
 	}
 	return parseQidianDiscoveryResults(markup, limit)
+}
+
+type qidianBooklistCatalogPayload struct {
+	PageContext struct {
+		PageProps struct {
+			PageData struct {
+				RecBookList      []qidianBooklistMetadata `json:"recBookList"`
+				FeaturedBookList []qidianBooklistMetadata `json:"featuredBookList"`
+			} `json:"pageData"`
+		} `json:"pageProps"`
+	} `json:"pageContext"`
+}
+
+type qidianBooklistMetadata struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"bookListName"`
+	Description  string `json:"bookListDesc"`
+	BookCount    int    `json:"bookCount"`
+	CollectCount int    `json:"collectCount"`
+	Label        string `json:"label"`
+	OwnerName    string `json:"ownerName"`
+	Samples      []struct {
+		BookID string `json:"bookId"`
+	} `json:"samples"`
+}
+
+type qidianBooklistDetailPayload struct {
+	PageContext struct {
+		PageProps struct {
+			PageData struct {
+				BookListInfo struct {
+					ID        int64                    `json:"id"`
+					Name      string                   `json:"bookListName"`
+					BookCount int                      `json:"bookCount"`
+					Books     []qidianBooklistBookInfo `json:"books"`
+				} `json:"bookListInfo"`
+			} `json:"pageData"`
+		} `json:"pageProps"`
+	} `json:"pageContext"`
+}
+
+type qidianBooklistBookInfo struct {
+	BookID         string `json:"bookId"`
+	Title          string `json:"bookName"`
+	Author         string `json:"authorName"`
+	Description    string `json:"desc"`
+	Recommendation string `json:"recommendation"`
+	Channel        string `json:"chanName"`
+	Status         string `json:"bookStatus"`
+	LatestChapter  string `json:"updChapterName"`
+}
+
+func parseQidianSSRPageData(markup string, target any) error {
+	doc, err := parseHTML(markup)
+	if err != nil {
+		return err
+	}
+	script := findFirst(doc, func(node *html.Node) bool {
+		return node.Type == html.ElementNode &&
+			node.Data == "script" &&
+			attrValue(node, "id") == "vite-plugin-ssr_pageContext"
+	})
+	if script == nil {
+		return fmt.Errorf("qidian SSR page data not found")
+	}
+	payload := strings.TrimSpace(nodeText(script))
+	if payload == "" {
+		return fmt.Errorf("qidian SSR page data is empty")
+	}
+	if err := json.Unmarshal([]byte(payload), target); err != nil {
+		return fmt.Errorf("decode qidian SSR page data: %w", err)
+	}
+	return nil
+}
+
+func parseQidianBooklistCatalog(markup string) []DiscoveryList {
+	var payload qidianBooklistCatalogPayload
+	if err := parseQidianSSRPageData(markup, &payload); err != nil {
+		return nil
+	}
+	items := make([]qidianBooklistMetadata, 0, len(payload.PageContext.PageProps.PageData.RecBookList)+len(payload.PageContext.PageProps.PageData.FeaturedBookList))
+	items = append(items, payload.PageContext.PageProps.PageData.FeaturedBookList...)
+	items = append(items, payload.PageContext.PageProps.PageData.RecBookList...)
+
+	lists := make([]DiscoveryList, 0, len(items))
+	seen := make(map[int64]struct{}, len(items))
+	for _, item := range items {
+		if item.ID <= 0 {
+			continue
+		}
+		if _, exists := seen[item.ID]; exists {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		name := cleanText(item.Name)
+		if name == "" {
+			continue
+		}
+		description := cleanText(item.Description)
+		if owner := strings.TrimSpace(item.OwnerName); owner != "" {
+			if description == "" {
+				description = "书单主：" + owner
+			} else {
+				description += " · 书单主：" + owner
+			}
+		}
+		lists = append(lists, DiscoveryList{
+			ID:              fmt.Sprintf("booklist:%d", item.ID),
+			Name:            name,
+			Description:     description,
+			Kind:            "booklist",
+			UpdateFrequency: "起点书单",
+			BookCount:       item.BookCount,
+		})
+	}
+	return lists
+}
+
+func parseQidianBooklistBooks(markup string, limit int) ([]model.SearchResult, error) {
+	var payload qidianBooklistDetailPayload
+	if err := parseQidianSSRPageData(markup, &payload); err != nil {
+		return nil, err
+	}
+	books := payload.PageContext.PageProps.PageData.BookListInfo.Books
+	if len(books) == 0 {
+		return nil, fmt.Errorf("qidian booklist has no books")
+	}
+	results := make([]model.SearchResult, 0, len(books))
+	seen := make(map[string]struct{}, len(books))
+	for _, book := range books {
+		bookID := strings.TrimSpace(book.BookID)
+		title := cleanText(book.Title)
+		if bookID == "" || title == "" {
+			continue
+		}
+		if _, exists := seen[bookID]; exists {
+			continue
+		}
+		seen[bookID] = struct{}{}
+		description := cleanText(book.Description)
+		if description == "" {
+			description = cleanText(book.Recommendation)
+		}
+		results = append(results, model.SearchResult{
+			Site:          "qidian",
+			BookID:        bookID,
+			Title:         title,
+			Author:        cleanText(book.Author),
+			Description:   description,
+			URL:           fmt.Sprintf("https://www.qidian.com/book/%s/", bookID),
+			LatestChapter: cleanText(book.LatestChapter),
+			CoverURL:      qidianDiscoveryCoverURL(bookID),
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
+}
+
+func qidianDiscoveryCoverURL(bookID string) string {
+	bookID = strings.TrimSpace(bookID)
+	if bookID == "" {
+		return ""
+	}
+	return "https://bookcover.yuewen.com/qdbimg/349573/" + bookID + "/180"
 }
 
 func parseQidianDiscoveryResults(markup string, limit int) ([]model.SearchResult, error) {

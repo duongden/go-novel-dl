@@ -99,6 +99,40 @@ func TestMetaIncludesSearchableDownloadSources(t *testing.T) {
 
 }
 
+func TestSearchableSourceDescriptorsIncludesSearchOnlyChannels(t *testing.T) {
+	items := []site.SiteDescriptor{
+		{Key: "download", Capabilities: site.Capabilities{Search: true, Download: true}},
+		{Key: "search-only", Capabilities: site.Capabilities{Search: true, Download: false}},
+		{Key: "download-only", Capabilities: site.Capabilities{Search: false, Download: true}},
+	}
+	filtered := searchableSourceDescriptors(items)
+	if len(filtered) != 2 {
+		t.Fatalf("expected download and search-only descriptors, got %+v", filtered)
+	}
+	if findDescriptor(filtered, "search-only") == nil {
+		t.Fatalf("search-only channel must be available in the web search source list: %+v", filtered)
+	}
+	if findDescriptor(filtered, "download-only") != nil {
+		t.Fatalf("download-only channel must not be available in the web search source list: %+v", filtered)
+	}
+}
+
+func TestSourceCapabilityUIHandlesSerializedDownloadField(t *testing.T) {
+	scriptData, err := templateFS.ReadFile("templates/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	script := string(scriptData)
+	for _, needle := range []string{
+		"capabilities.download === true",
+		"capabilities.Download === true",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("expected source capability handling to contain %s", needle)
+		}
+	}
+}
+
 func TestIndexPageIncludesSourceTagFilterControls(t *testing.T) {
 	service := newTestService()
 	router := newRouter(service)
@@ -1077,7 +1111,7 @@ func TestSearchEndpointRejectsUnsupportedSelectedSources(t *testing.T) {
 	if resp.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d with body %s", resp.Code, resp.Body.String())
 	}
-	if !strings.Contains(resp.Body.String(), "support both search and download") {
+	if !strings.Contains(resp.Body.String(), "support search") {
 		t.Fatalf("expected unsupported site error, got %s", resp.Body.String())
 	}
 }
@@ -1672,7 +1706,7 @@ func newTestServiceWithOptions(opts testServiceOptions) *Service {
 	})
 	runtime.Registry = registry
 
-	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
+	allSources := searchableSourceDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	return &Service{
 		Config:         &cfg,
 		Runtime:        runtime,

@@ -181,7 +181,7 @@ func newService(configPath string) (*Service, error) {
 	runtime := app.NewRuntime(cfg, console)
 	runtime.Progress = progress.NullReporter{}
 
-	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
+	allSources := searchableSourceDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	defaultSources := defaultAvailableDescriptors(allSources)
 	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources))
 	if err != nil {
@@ -236,7 +236,7 @@ func (s *Service) reloadRuntime() error {
 	}
 	s.Runtime = runtime
 	s.PageSize = webPageSizeFromConfig(cfg)
-	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
+	allSources := searchableSourceDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources))
 	if err != nil {
 		return err
@@ -293,7 +293,7 @@ func collectSiteWarnings(runtime *app.Runtime) []SiteWarning {
 	if runtime == nil || runtime.Registry == nil {
 		return nil
 	}
-	available := descriptorKeySet(searchableDownloadDescriptors(runtime.Registry.AllSiteDescriptors()))
+	available := descriptorKeySet(searchableSourceDescriptors(runtime.Registry.AllSiteDescriptors()))
 	warnings := make([]SiteWarning, 0, 2)
 	if _, ok := available["esjzone"]; ok {
 		warnings = append(warnings, SiteWarning{
@@ -632,7 +632,7 @@ func newRouter(service *Service) *gin.Engine {
 		if len(sites) > 0 {
 			sites = filterAllowedSites(sites, allowedSites)
 			if len(sites) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "selected sites must support both search and download"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "selected sites must support search"})
 				return
 			}
 		}
@@ -644,7 +644,7 @@ func newRouter(service *Service) *gin.Engine {
 			}
 		}
 		if len(sites) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no searchable download sources available"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no searchable sources available"})
 			return
 		}
 		req.Tag = strings.TrimSpace(req.Tag)
@@ -1638,14 +1638,14 @@ func normalizeSites(items []string) []string {
 	return sites
 }
 
-func searchableDownloadDescriptors(items []site.SiteDescriptor) []site.SiteDescriptor {
+func searchableSourceDescriptors(items []site.SiteDescriptor) []site.SiteDescriptor {
 	if len(items) == 0 {
 		return nil
 	}
 
 	filtered := make([]site.SiteDescriptor, 0, len(items))
 	for _, item := range items {
-		if !item.Capabilities.Search || !item.Capabilities.Download {
+		if !item.Capabilities.Search {
 			continue
 		}
 		if hideWebSource(item.Key) {

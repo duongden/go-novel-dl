@@ -267,7 +267,7 @@ go run ./cmd/novel-dl config site-set esjzone ^
 
 ### Web 特性
 
-- **搜索**：仅展示同时支持搜索和下载的站点；支持关键词与直接粘贴书籍 URL；按站点标签多选筛选取交集；命中当前页所需结果即返回，慢源/坏源不阻塞首屏
+- **搜索**：展示所有支持搜索的站点；仅搜索渠道会明确标注并直接打开原站；支持关键词与直接粘贴书籍 URL；按站点标签多选筛选取交集；命中当前页所需结果即返回，慢源/坏源不阻塞首屏
 - **渠道测速**：一键并发探测可见渠道，每站最多采两次取最优（best-of-2），前端用耗时徽章展示
 - **状态持久化**：渠道选择与标签筛选写入 `localStorage`，换浏览器/重启后保留
 - **详情与阅读器**：`DownloadPlan` 拉目录与元数据并 TTL 缓存；章节正文按需 + 上下文预加载；阅读器支持主题/背景/字号/排版
@@ -406,6 +406,7 @@ n69shuba
 n8novel
 novalpie
 novelpia
+qidian
 qqreader
 ruochu
 sfacg
@@ -417,6 +418,7 @@ syosetu_org
 tianyabooks
 tongrenshe
 wenku8
+weread
 yibige
 ```
 
@@ -520,6 +522,12 @@ syosetu_org
 yibige
 ```
 
+仅支持搜索：
+
+```text
+weread
+```
+
 需要登录或鉴权：
 
 ```text
@@ -529,7 +537,9 @@ novalpie
 
 ESJ Zone 搜索和详情无需预先登录；只有遇到需要认证的章节时才可能需要 Cookie/账号。
 QQ 阅读的免费章节可直接下载；会员或已购章节需要把有权访问该书的 QQ Cookie 配置到 `qqreader` 渠道。
-QQ 阅读的发现页已接入官方男女频、出版分类排行榜，以及穿越、重生、校园甜宠等真实书单分类。
+QQ 阅读的发现页已接入官方男女频、出版分类排行榜以及多类真实书单，并会合并主推荐书与关联书、按页补齐结果。
+起点已接入移动端公开书单；刺猬猫只展示源站公开的 2 个官方书单。
+微信读书已接入公开搜索和 6 个公开排行榜。正文需要登录与版权权限，因此仅支持搜索，不提供下载。
 
 ### 可在配置中心管理的站点
 
@@ -558,6 +568,7 @@ ciweimao
 kadokado
 novalpie
 novelpia
+qidian
 qqreader
 haiwaishubao
 mjyhb
@@ -570,6 +581,7 @@ syosetu_org
 tianyabooks
 tongrenshe
 wenku8
+weread
 ```
 
 这意味着：

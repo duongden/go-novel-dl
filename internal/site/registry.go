@@ -185,6 +185,9 @@ func NewDefaultRegistry() *Registry {
 	registry.RegisterWithHosts("qqreader", []string{"book.qq.com", "ubook.reader.qq.com"}, func(cfg config.ResolvedSiteConfig) Site {
 		return NewQQReaderSite(cfg)
 	})
+	registry.RegisterWithHosts("weread", []string{"weread.qq.com"}, func(cfg config.ResolvedSiteConfig) Site {
+		return NewWeReadSite(cfg)
+	})
 	registry.RegisterWithHosts("faloo", []string{"b.faloo.com"}, func(cfg config.ResolvedSiteConfig) Site {
 		return NewFalooSite(cfg)
 	})

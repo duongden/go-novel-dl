@@ -9,9 +9,13 @@ const versionInfo = window.__NOVEL_DL__.version || { current: "", repo: "", mirr
 const sourceLabelMap = new Map(
   allSources.map((source) => [source.key, source.display_name || source.key]),
 );
+const sourceCapabilitiesMap = new Map(
+  allSources.map((source) => [source.key, source.capabilities || {}]),
+);
 const discoverySiteShortLabels = Object.freeze({
   qidian: "起点",
   qqreader: "QQ阅读",
+  weread: "微信读书",
   ciweimao: "刺猬猫",
   faloo: "飞卢",
   fanqienovel: "番茄",
@@ -63,7 +67,7 @@ let sourceTagSet = new Set();
 const SOURCE_TAG_SUGGESTIONS = [
   "简体中文", "繁体中文", "日文", "韩文", "英文",
   "原创", "转载站", "免费", "付费",
-  "网络小说", "轻小说", "经典图书", "二次元", "同人二创",
+  "网络小说", "轻小说", "经典图书", "出版物", "正版", "二次元", "同人二创",
   "男性向", "女性向", "成人向", "NSFW",
 ];
 refreshSourceTagSet();
@@ -1069,6 +1073,13 @@ function renderSourceSelector() {
       tag.textContent = tagText;
       tags.appendChild(tag);
     });
+    if (!sourceSupportsDownload(source.key)) {
+      const capability = document.createElement("span");
+      capability.className = "source-option-tag is-capability";
+      capability.textContent = "仅搜索";
+      capability.title = "该渠道不提供正文下载，点击搜索结果会打开原站";
+      tags.appendChild(capability);
+    }
 
     const speedBadge = renderSourceSpeedBadge(source.key);
     if (speedBadge) tags.appendChild(speedBadge);
@@ -1602,6 +1613,25 @@ function sourceTagCatalog() {
 
 function sourceTags(source) {
   return (Array.isArray(source.tags) ? source.tags : []).map((tagText) => `${tagText || ""}`.trim()).filter(Boolean);
+}
+
+function sourceSupportsDownload(siteKey) {
+  const capabilities = sourceCapabilitiesMap.get(siteKey) || {};
+  return capabilities.download === true || capabilities.Download === true;
+}
+
+function openResultVariant(result, variant) {
+  const activeVariant = variant || (result && result.primary) || {};
+  if (sourceSupportsDownload(activeVariant.site)) {
+    openDetail(result, activeVariant);
+    return;
+  }
+  const targetURL = `${activeVariant.url || (result && result.url) || ""}`.trim();
+  if (!targetURL) {
+    setStatus("这个渠道当前只提供搜索，但没有返回可打开的原站链接。", "error");
+    return;
+  }
+  window.open(targetURL, "_blank", "noopener,noreferrer");
 }
 
 function filteredSources() {
@@ -2159,6 +2189,7 @@ function renderDiscoverList() {
 }
 
 function createDiscoveryBookCard(book, index = 0) {
+  const canDownload = sourceSupportsDownload(book.site);
   const result = {
     title: book.title || "",
     author: book.author || "",
@@ -2175,8 +2206,8 @@ function createDiscoveryBookCard(book, index = 0) {
   card.className = "result-card is-clickable discover-book-card";
   card.dataset.rank = String(index + 1);
   card.setAttribute("tabindex", "0");
-  card.setAttribute("aria-label", `查看${book.title || "未命名小说"}的详情`);
-  const open = () => openDetail(result, book);
+  card.setAttribute("aria-label", `${canDownload ? "查看" : "打开"}${book.title || "未命名小说"}`);
+  const open = () => openResultVariant(result, book);
   card.addEventListener("click", open);
   card.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -2188,7 +2219,7 @@ function createDiscoveryBookCard(book, index = 0) {
   const coverButton = document.createElement("button");
   coverButton.type = "button";
   coverButton.className = "result-cover-button";
-  coverButton.setAttribute("aria-label", `查看${book.title || "未命名小说"}的详情`);
+  coverButton.setAttribute("aria-label", `${canDownload ? "查看" : "打开"}${book.title || "未命名小说"}`);
   coverButton.appendChild(createCoverImage(book.cover_url, book.title, "result-cover"));
   const rank = document.createElement("span");
   rank.className = "discover-rank-badge";
@@ -2205,7 +2236,7 @@ function createDiscoveryBookCard(book, index = 0) {
   author.textContent = `作者：${book.author || "未知作者"}`;
   const source = document.createElement("p");
   source.className = "result-source";
-  source.textContent = `来源：${sourceLabel(book.site)}`;
+  source.textContent = `来源：${sourceLabel(book.site)}${canDownload ? "" : " · 仅搜索"}`;
   body.append(title, author, source);
   if (book.description) {
     const description = document.createElement("p");
@@ -2274,11 +2305,12 @@ function renderResults(results) {
   if (!results.length) return resultsNode.appendChild(createEmptyState("当前页没有可展示的结果。"));
 
   results.forEach((result) => {
+    const canDownload = sourceSupportsDownload(result.preferred_site);
     const card = document.createElement("article");
     card.className = "result-card is-clickable";
     card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `查看 ${displayResultTitle(result)} 的详情`);
-    const open = () => openDetail(result, result.primary);
+    card.setAttribute("aria-label", `${canDownload ? "查看" : "打开"} ${displayResultTitle(result)}`);
+    const open = () => openResultVariant(result, result.primary);
     card.addEventListener("click", open);
     card.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -2295,7 +2327,7 @@ function renderResults(results) {
 
     const overlay = document.createElement("span");
     overlay.className = "result-cover-overlay";
-    overlay.textContent = "查看详情";
+    overlay.textContent = canDownload ? "查看详情" : "打开原站";
     coverButton.appendChild(overlay);
 
     const body = document.createElement("div");
@@ -2311,7 +2343,7 @@ function renderResults(results) {
 
     const source = document.createElement("p");
     source.className = "result-source";
-    source.textContent = `源：${sourceLabel(result.preferred_site)}`;
+    source.textContent = `源：${sourceLabel(result.preferred_site)}${canDownload ? "" : " · 仅搜索"}`;
 
     body.appendChild(title); body.appendChild(author); body.appendChild(source);
 
@@ -2407,7 +2439,7 @@ async function warmupDetailCache(results) {
   const queue = results.slice(0, 6).map((result) => ({
     result,
     variant: result.primary,
-  })).filter((item) => item.variant && item.variant.site && item.variant.book_id && shouldWarmupDetail(item.variant.site) && !appState.detailCache.has(detailRequestKey(item.variant, 1, normalizedChapterPageSize())));
+  })).filter((item) => item.variant && item.variant.site && item.variant.book_id && sourceSupportsDownload(item.variant.site) && shouldWarmupDetail(item.variant.site) && !appState.detailCache.has(detailRequestKey(item.variant, 1, normalizedChapterPageSize())));
   const workers = Math.min(2, queue.length);
   let cursor = 0;
 
@@ -2512,11 +2544,13 @@ function renderDetail(result, variant, detail, loading, errorMessage) {
     const switchWrap = document.createElement("div");
     switchWrap.className = "detail-source-switch";
     variants.forEach((item) => {
+      const canDownload = sourceSupportsDownload(item.site);
       const button = document.createElement("button");
       button.type = "button"; button.className = "detail-source-button";
       if (detailKey(item) === detailKey(activeVariant)) button.classList.add("is-active");
-      button.textContent = sourceLabel(item.site);
-      button.addEventListener("click", () => openDetail(result, item));
+      button.textContent = `${sourceLabel(item.site)}${canDownload ? "" : "（原站）"}`;
+      button.title = canDownload ? `切换到${sourceLabel(item.site)}` : `在${sourceLabel(item.site)}打开`;
+      button.addEventListener("click", () => openResultVariant(result, item));
       switchWrap.appendChild(button);
     });
     summary.appendChild(switchWrap);

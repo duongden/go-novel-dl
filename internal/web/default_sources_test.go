@@ -18,7 +18,7 @@ func TestDefaultWebMetaIncludesNewSearchSources(t *testing.T) {
 	cfg := config.DefaultConfig()
 	runtime := app.NewRuntime(&cfg, ui.NewConsole(nil, io.Discard, io.Discard))
 	runtime.Progress = progress.NullReporter{}
-	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
+	allSources := searchableSourceDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	defaultSources := defaultAvailableDescriptors(allSources)
 	service := &Service{
 		Config:         &cfg,

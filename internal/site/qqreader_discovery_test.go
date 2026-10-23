@@ -13,7 +13,7 @@ func TestQQReaderDiscoveryListsExposeOfficialRankingsAndBooklists(t *testing.T) 
 	if err != nil {
 		t.Fatalf("DiscoveryLists: %v", err)
 	}
-	if len(lists) != len(qqReaderRankingSpecs)+len(qqReaderBooklistSpecs) {
+	if len(lists) != len(qqReaderRankingSpecs)+len(qqReaderAllBooklistSpecs()) {
 		t.Fatalf("unexpected discovery list count: %d", len(lists))
 	}
 	rankings := 0
@@ -28,7 +28,7 @@ func TestQQReaderDiscoveryListsExposeOfficialRankingsAndBooklists(t *testing.T) 
 			t.Fatalf("unexpected list kind: %+v", item)
 		}
 	}
-	if rankings != 13 || booklists != 6 {
+	if rankings != 13 || booklists != len(qqReaderAllBooklistSpecs()) {
 		t.Fatalf("unexpected discovery list categories: rankings=%d booklists=%d", rankings, booklists)
 	}
 }
@@ -79,31 +79,31 @@ func TestQQReaderDiscoveryRankingPaginatesAndDeduplicates(t *testing.T) {
 	}
 }
 
-func TestQQReaderDiscoveryBooklistCombinesTagsAndDeduplicates(t *testing.T) {
+func TestQQReaderDiscoveryBooklistIncludesPrimaryBooksPaginatesAndDeduplicates(t *testing.T) {
 	requestedTags := make([]string, 0, 2)
 	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/api/site/seo/new/book/list" {
 			return qqReaderTestResponse(req, http.StatusBadRequest, `{}`), nil
 		}
 		tagID := req.URL.Query().Get("tagId")
-		requestedTags = append(requestedTags, tagID)
+		requestedPages := req.URL.Query().Get("pageNo")
+		requestedTags = append(requestedTags, tagID+":"+requestedPages)
 		switch tagID {
 		case "9000722":
-			return qqReaderTestResponse(req, http.StatusOK, `{
-				"code":0,"msg":"ok","data":{"tagName":"Travel","list":[
-					{"relatedBooks":[
-						{"bid":201,"title":"Book 201","author":"Author 201","intro":"Intro 201"},
-						{"bid":202,"title":"Book 202","author":"Author 202","intro":"Intro 202"}
+			if requestedPages == "2" {
+				return qqReaderTestResponse(req, http.StatusOK, `{
+					"code":0,"msg":"ok","data":{"nextPage":false,"totalPage":2,"list":[
+						{"bookInfo":{"bid":203,"title":"Book 203","author":"Author 203","intro":"Intro 203"},
+						 "relatedBooks":[{"bid":204,"title":"Book 204","author":"Author 204","intro":"Intro 204"}]}
 					]}
-				]}
-			}`), nil
-		case "8000565":
+				}`), nil
+			}
 			return qqReaderTestResponse(req, http.StatusOK, `{
-				"code":0,"msg":"ok","data":{"tagName":"Travel","list":[
-					{"relatedBooks":[
-						{"bid":202,"title":"Book 202 duplicate","author":"Author 202","intro":"Intro 202"},
-						{"bid":203,"title":"Book 203","author":"Author 203","intro":"Intro 203"}
-					]}
+				"code":0,"msg":"ok","data":{"tagName":"Travel","nextPage":true,"totalPage":2,"list":[
+					{"bookInfo":{"bid":201,"title":"Book 201","author":"Author 201","intro":"Intro 201"},
+					 "relatedBooks":[{"bid":202,"title":"Book 202","author":"Author 202","intro":"Intro 202"}]},
+					{"bookInfo":{"bid":202,"title":"Book 202 primary duplicate","author":"Author 202","intro":"Intro 202"},
+					 "relatedBooks":[]}
 				]}
 			}`), nil
 		default:
@@ -111,15 +111,15 @@ func TestQQReaderDiscoveryBooklistCombinesTagsAndDeduplicates(t *testing.T) {
 		}
 	})
 
-	results, err := site.DiscoveryBooks(context.Background(), "booklist-travel", 3)
+	results, err := site.DiscoveryBooks(context.Background(), "booklist-travel", 4)
 	if err != nil {
 		t.Fatalf("DiscoveryBooks: %v", err)
 	}
-	if len(results) != 3 || results[0].BookID != "201" || results[2].BookID != "203" {
+	if len(results) != 4 || results[0].BookID != "201" || results[3].BookID != "204" {
 		t.Fatalf("unexpected booklist results: %+v", results)
 	}
-	if strings.Join(requestedTags, ",") != "9000722,8000565" {
-		t.Fatalf("unexpected requested tags: %v", requestedTags)
+	if strings.Join(requestedTags, ",") != "9000722:1,9000722:2" {
+		t.Fatalf("unexpected requested tag pages: %v", requestedTags)
 	}
 }
 

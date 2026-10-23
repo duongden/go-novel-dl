@@ -64,6 +64,10 @@ var siteMetadata = map[string]SiteMetadata{
 		Title: "QQ阅读",
 		Tags:  []string{"原创", "阅文"},
 	},
+	"weread": {
+		Title: "微信读书",
+		Tags:  []string{"出版物", "正版"},
+	},
 	"fsshu": {
 		Title: "笔趣阁",
 		Tags:  []string{"网络小说", "笔趣阁"},
