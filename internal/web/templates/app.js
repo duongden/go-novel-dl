@@ -2700,7 +2700,7 @@ function renderChapterList(result, variant, chapters, chapterOffset = 0, chapter
         const badge = document.createElement("span");
         badge.className = "chapter-locked-badge";
         badge.textContent = "付费";
-        badge.title = "付费章节，点开只能看到微信读书提供的试读片段";
+        badge.title = "付费章节，需要登录账号具备相应的购买或会员权限";
         item.appendChild(badge);
       }
       item.addEventListener("click", () => {
@@ -3423,7 +3423,7 @@ async function renderReaderWindow(centerIndex, options = {}) {
     if (ch.locked) {
       const notice = document.createElement("div");
       notice.className = "reader-locked-notice";
-      notice.textContent = "该章为付费章节，这里显示的是微信读书提供的试读片段。购买后配置登录 Cookie 才能抓取全文。";
+      notice.textContent = "该章为付费章节，当前仅显示可访问内容。购买并配置登录 Cookie 后才能获取全文。";
       block.prepend(notice);
     }
   }
@@ -3687,7 +3687,7 @@ function renderReaderCatalog() {
     if (chapter.locked) {
       button.classList.add("is-locked");
       button.textContent += "（付费）";
-      button.title = "付费章节，点开只能看到微信读书提供的试读片段";
+      button.title = "付费章节，需要登录账号具备相应的购买或会员权限";
     }
     button.addEventListener("click", () => jumpReaderToChapter(index));
     readerCatalogList.appendChild(button);

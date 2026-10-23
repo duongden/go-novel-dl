@@ -211,7 +211,7 @@ func TestQQReaderSearchKeepsResultsWhenLaterPageFails(t *testing.T) {
 	}
 }
 
-func TestQQReaderDownloadPlanFiltersLockedChaptersByDefault(t *testing.T) {
+func TestQQReaderDownloadPlanIncludesLockedChapters(t *testing.T) {
 	site := newQQReaderTestSite(t, qqReaderPlanResponse)
 	book, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "621674"})
 	if err != nil {
@@ -223,8 +223,11 @@ func TestQQReaderDownloadPlanFiltersLockedChaptersByDefault(t *testing.T) {
 	if book.SourceURL != "https://book.qq.com/book-detail/621674" {
 		t.Fatalf("unexpected source URL: %s", book.SourceURL)
 	}
-	if len(book.Chapters) != 2 || book.Chapters[0].ID != "2" || book.Chapters[1].ID != "4" {
-		t.Fatalf("expected free and purchased chapters only, got %+v", book.Chapters)
+	if len(book.Chapters) != 3 || book.Chapters[0].ID != "2" || book.Chapters[1].ID != "3" || book.Chapters[2].ID != "4" {
+		t.Fatalf("expected complete catalog, got %+v", book.Chapters)
+	}
+	if book.Chapters[0].Locked || !book.Chapters[1].Locked || book.Chapters[2].Locked {
+		t.Fatalf("unexpected locked chapter markers: %+v", book.Chapters)
 	}
 	if !containsString(book.Tags, "哲学") || !containsString(book.Tags, "完结") {
 		t.Fatalf("expected source categories in book tags, got %v", book.Tags)
@@ -252,6 +255,36 @@ func TestQQReaderDownloadPlanFiltersLockedChaptersByDefault(t *testing.T) {
 	}
 	if len(cookieBook.Chapters) != 3 {
 		t.Fatalf("expected cookie-enabled catalog to retain locked chapters, got %+v", cookieBook.Chapters)
+	}
+}
+
+func TestQQReaderDownloadSkipsLockedChaptersByDefault(t *testing.T) {
+	requested := make([]string, 0, 2)
+	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/api/book/read" {
+			requested = append(requested, req.URL.Query().Get("cid"))
+			return qqReaderTestResponse(req, http.StatusOK, `{
+				"code":0,"msg":"ok","data":{
+					"chapterTitle":"Readable chapter","authStatus":1,
+					"content":"<p>Readable content.</p>"
+				}
+			}`), nil
+		}
+		return qqReaderPlanResponse(req)
+	})
+
+	book, err := site.Download(context.Background(), model.BookRef{BookID: "621674"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if strings.Join(requested, ",") != "2,4" {
+		t.Fatalf("locked chapter should not be requested, got requests %v", requested)
+	}
+	if len(book.Chapters) != 2 || book.Chapters[0].ID != "2" || book.Chapters[1].ID != "4" {
+		t.Fatalf("unexpected downloadable chapters: %+v", book.Chapters)
+	}
+	if book.Chapters[0].Order != 1 || book.Chapters[1].Order != 2 || book.Chapters[0].Locked || book.Chapters[1].Locked {
+		t.Fatalf("downloaded chapters should be contiguous and unlocked: %+v", book.Chapters)
 	}
 }
 

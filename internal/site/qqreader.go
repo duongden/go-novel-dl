@@ -352,6 +352,8 @@ func qqReaderSearchResult(item qqReaderSearchBookData) (model.SearchResult, bool
 	}, true
 }
 
+// DownloadPlan 返回源站目录中的全部章节。付费章节会标记 Locked=true：
+// 详情页和阅读器目录需要展示完整目录，但默认下载时不会抓取受限正文。
 func (s *QQReaderSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*model.Book, error) {
 	bookID := strings.TrimSpace(ref.BookID)
 	if bookID == "" {
@@ -366,7 +368,6 @@ func (s *QQReaderSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		return nil, err
 	}
 
-	includeLocked := s.cfg.General.FetchInaccessible || strings.TrimSpace(s.cfg.Cookie) != ""
 	chapters := make([]model.Chapter, 0, len(catalog.Data))
 	for _, item := range catalog.Data {
 		if item.ChapterID <= 0 {
@@ -375,21 +376,16 @@ func (s *QQReaderSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mo
 		if qqReaderImageOnlyChapter(item.ChapterName) {
 			continue
 		}
-		if !includeLocked && item.Free != 1 && item.Purchased != 1 {
-			continue
-		}
 		chapterID := strconv.FormatInt(item.ChapterID, 10)
 		chapters = append(chapters, model.Chapter{
-			ID:    chapterID,
-			Title: strings.TrimSpace(item.ChapterName),
-			URL:   qqReaderChapterURL(bookID, chapterID),
-			Order: len(chapters) + 1,
+			ID:     chapterID,
+			Title:  strings.TrimSpace(item.ChapterName),
+			URL:    qqReaderChapterURL(bookID, chapterID),
+			Order:  len(chapters) + 1,
+			Locked: item.Free != 1 && item.Purchased != 1,
 		})
 	}
 	if len(chapters) == 0 {
-		if len(catalog.Data) > 0 && !includeLocked {
-			return nil, fmt.Errorf("qqreader book %s has no free or purchased chapters; configure a QQ cookie with access or enable fetch_inaccessible", bookID)
-		}
 		return nil, fmt.Errorf("qqreader chapter catalog is empty for book %s", bookID)
 	}
 
@@ -440,19 +436,29 @@ func (s *QQReaderSite) FetchChapter(ctx context.Context, bookID string, chapter 
 }
 
 func (s *QQReaderSite) Download(ctx context.Context, ref model.BookRef) (*model.Book, error) {
-	book, err := s.DownloadPlan(ctx, ref)
+	plan, err := s.DownloadPlan(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	for idx, chapter := range book.Chapters {
-		loaded, err := s.FetchChapter(ctx, book.ID, chapter)
+	includeLocked := s.cfg.General.FetchInaccessible || strings.TrimSpace(s.cfg.Cookie) != ""
+	chapters := make([]model.Chapter, 0, len(plan.Chapters))
+	for _, chapter := range plan.Chapters {
+		if chapter.Locked && !includeLocked {
+			continue
+		}
+		loaded, err := s.FetchChapter(ctx, plan.ID, chapter)
 		if err != nil {
 			return nil, fmt.Errorf("qqreader fetch chapter %s: %w", chapter.ID, err)
 		}
-		loaded.Order = idx + 1
-		book.Chapters[idx] = loaded
+		loaded.Locked = false
+		loaded.Order = len(chapters) + 1
+		chapters = append(chapters, loaded)
 	}
-	return book, nil
+	if len(chapters) == 0 {
+		return nil, fmt.Errorf("qqreader book %s has no downloadable chapters; configure a QQ cookie with access or enable fetch_inaccessible", plan.ID)
+	}
+	plan.Chapters = chapters
+	return plan, nil
 }
 
 func (s *QQReaderSite) fetchSearchPage(ctx context.Context, keyword string, pageNo, pageSize int) (qqReaderSearchEnvelope, error) {
