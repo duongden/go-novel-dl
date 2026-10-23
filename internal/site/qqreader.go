@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/net/html"
 
@@ -181,7 +182,7 @@ func (s *QQReaderSite) Search(ctx context.Context, keyword string, limit int) ([
 		payload, err := s.fetchSearchPage(ctx, keyword, pageNo, pageSize)
 		if err != nil {
 			if errors.Is(err, errQQReaderSearchNoExactMatch) {
-				return results, nil
+				return s.searchWithFallback(ctx, keyword, limit)
 			}
 			// Search can return a valid first page and then fail while advancing.
 			// Keep the books already found instead of reporting the whole source
@@ -192,23 +193,78 @@ func (s *QQReaderSite) Search(ctx context.Context, keyword string, limit int) ([
 			return nil, err
 		}
 		for _, item := range payload.Data.BookList {
-			bookID := strconv.FormatInt(item.BookID, 10)
-			if item.BookID <= 0 {
+			result, ok := qqReaderSearchResult(item)
+			if !ok {
 				continue
 			}
-			if _, exists := seen[bookID]; exists {
+			if _, exists := seen[result.BookID]; exists {
 				continue
 			}
-			seen[bookID] = struct{}{}
-			results = append(results, model.SearchResult{
-				Site:        s.Key(),
-				BookID:      bookID,
-				Title:       strings.TrimSpace(item.Title),
-				Author:      strings.TrimSpace(item.Author),
-				Description: strings.TrimSpace(item.Intro),
-				URL:         qqReaderBookURL(bookID),
-				CoverURL:    qqReaderCoverURL(bookID),
-			})
+			seen[result.BookID] = struct{}{}
+			results = append(results, result)
+			if limit > 0 && len(results) >= limit {
+				return results, nil
+			}
+		}
+		if !payload.Data.HasNext || len(payload.Data.BookList) == 0 {
+			break
+		}
+	}
+	if len(results) == 0 {
+		return s.searchWithFallback(ctx, keyword, limit)
+	}
+	return results, nil
+}
+
+// QQ阅读的关键词库偶尔只收录书名中的部分词，并且不保证词序。
+// 仅在原始关键词完全未命中时尝试拆词后的反向组合，避免正常搜索多发请求。
+func (s *QQReaderSite) searchWithFallback(ctx context.Context, keyword string, limit int) ([]model.SearchResult, error) {
+	candidates := qqReaderFallbackKeywords(keyword)
+	for _, candidate := range candidates {
+		results, err := s.searchFallbackCandidate(ctx, candidate, keyword, limit)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		if len(results) > 0 {
+			return results, nil
+		}
+	}
+	return []model.SearchResult{}, nil
+}
+
+func (s *QQReaderSite) searchFallbackCandidate(ctx context.Context, candidate, keyword string, limit int) ([]model.SearchResult, error) {
+	const pageSize = 100
+	wantedTitle := qqReaderSearchText(keyword)
+	if wantedTitle == "" {
+		return nil, nil
+	}
+
+	results := make([]model.SearchResult, 0, 1)
+	seen := make(map[string]struct{})
+	for pageNo := 1; ; pageNo++ {
+		payload, err := s.fetchSearchPage(ctx, candidate, pageNo, pageSize)
+		if err != nil {
+			if errors.Is(err, errQQReaderSearchNoExactMatch) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		for _, item := range payload.Data.BookList {
+			if qqReaderSearchText(item.Title) != wantedTitle {
+				continue
+			}
+			result, ok := qqReaderSearchResult(item)
+			if !ok {
+				continue
+			}
+			if _, exists := seen[result.BookID]; exists {
+				continue
+			}
+			seen[result.BookID] = struct{}{}
+			results = append(results, result)
 			if limit > 0 && len(results) >= limit {
 				return results, nil
 			}
@@ -218,6 +274,82 @@ func (s *QQReaderSite) Search(ctx context.Context, keyword string, limit int) ([
 		}
 	}
 	return results, nil
+}
+
+func qqReaderFallbackKeywords(keyword string) []string {
+	normalized := qqReaderSearchText(keyword)
+	runes := []rune(normalized)
+	if len(runes) < 4 {
+		return nil
+	}
+
+	const separators = "我你他她它被把让给和与及在是的有就都也又还很太更最第们了着过吗呢吧啊呀么"
+	fragments := make([]string, 0, 4)
+	start := 0
+	for idx, current := range runes {
+		if !strings.ContainsRune(separators, current) {
+			continue
+		}
+		if idx > start {
+			fragments = append(fragments, string(runes[start:idx]))
+		}
+		start = idx + 1
+	}
+	if start < len(runes) {
+		fragments = append(fragments, string(runes[start:]))
+	}
+	if len(fragments) < 2 {
+		return nil
+	}
+
+	candidates := make([]string, 0, len(fragments)+1)
+	seen := make(map[string]struct{}, len(fragments)+1)
+	appendCandidate := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || raw == normalized || len([]rune(raw)) < 2 {
+			return
+		}
+		if _, exists := seen[raw]; exists {
+			return
+		}
+		seen[raw] = struct{}{}
+		candidates = append(candidates, raw)
+	}
+
+	reversed := make([]string, 0, len(fragments))
+	for idx := len(fragments) - 1; idx >= 0; idx-- {
+		reversed = append(reversed, fragments[idx])
+	}
+	appendCandidate(strings.Join(reversed, ""))
+	for _, fragment := range fragments {
+		appendCandidate(fragment)
+	}
+	return candidates
+}
+
+func qqReaderSearchText(raw string) string {
+	return strings.Map(func(current rune) rune {
+		if unicode.IsLetter(current) || unicode.IsNumber(current) {
+			return unicode.ToLower(current)
+		}
+		return -1
+	}, strings.TrimSpace(raw))
+}
+
+func qqReaderSearchResult(item qqReaderSearchBookData) (model.SearchResult, bool) {
+	if item.BookID <= 0 {
+		return model.SearchResult{}, false
+	}
+	bookID := strconv.FormatInt(item.BookID, 10)
+	return model.SearchResult{
+		Site:        "qqreader",
+		BookID:      bookID,
+		Title:       strings.TrimSpace(item.Title),
+		Author:      strings.TrimSpace(item.Author),
+		Description: strings.TrimSpace(item.Intro),
+		URL:         qqReaderBookURL(bookID),
+		CoverURL:    qqReaderCoverURL(bookID),
+	}, true
 }
 
 func (s *QQReaderSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*model.Book, error) {

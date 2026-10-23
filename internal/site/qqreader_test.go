@@ -139,6 +139,51 @@ func TestQQReaderSearchTreatsUnknownKeywordAsEmptyResult(t *testing.T) {
 	}
 }
 
+func TestQQReaderSearchFallsBackForOutOfOrderKeywordIndex(t *testing.T) {
+	keyword := "我被美少女们模拟了"
+	fallbackQueries := make([]string, 0, 2)
+	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
+		query := req.URL.Query().Get("keyWord")
+		if query == keyword {
+			return qqReaderTestResponse(req, http.StatusOK, `{
+				"code":404,"msg":"不在关键词库中","data":{"pageNo":1,"pageSize":20,"hasNext":false,"bookList":[]}
+			}`), nil
+		}
+		if query != "模拟美少女" {
+			return qqReaderTestResponse(req, http.StatusOK, `{
+				"code":404,"msg":"不在关键词库中","data":null}
+			`), nil
+		}
+		if req.URL.Query().Get("pageSize") != "100" {
+			return qqReaderTestResponse(req, http.StatusBadRequest, `{}`), nil
+		}
+		fallbackQueries = append(fallbackQueries, query)
+		books := make([]string, 0, 30)
+		for idx := 0; idx < 29; idx++ {
+			books = append(books, fmt.Sprintf(
+				`{"bid":%d,"title":"无关结果%d","author":"作者","intro":"简介"}`,
+				600000+idx,
+				idx,
+			))
+		}
+		books = append(books, `{"bid":50386531,"title":"我被美少女们模拟了","author":"大小姐的金平糖","intro":"简介","free":1}`)
+		return qqReaderTestResponse(req, http.StatusOK, fmt.Sprintf(`{
+			"code":0,"msg":"ok","data":{"pageNo":1,"pageSize":100,"totals":30,"hasNext":false,"bookList":[%s]}
+		}`, strings.Join(books, ","))), nil
+	})
+
+	results, err := site.Search(context.Background(), keyword, 20)
+	if err != nil {
+		t.Fatalf("Search fallback: %v", err)
+	}
+	if len(results) != 1 || results[0].BookID != "50386531" || results[0].Title != keyword {
+		t.Fatalf("expected the exact fallback result, got %+v", results)
+	}
+	if strings.Join(fallbackQueries, ",") != "模拟美少女" {
+		t.Fatalf("unexpected fallback queries: %v", fallbackQueries)
+	}
+}
+
 func TestQQReaderSearchKeepsResultsWhenLaterPageFails(t *testing.T) {
 	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Query().Get("pageNo") {
