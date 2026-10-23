@@ -12,7 +12,7 @@ func TestSourceTagsSeedPreservesUserChanges(t *testing.T) {
 		"esjzone": {"简体中文", "轻小说", "转载站"},
 		"qidian":  {"简体中文", "原创", "网络小说"},
 	}
-	seeded, err := EnsureSourceTags(defaults, nil)
+	seeded, err := EnsureSourceTags(defaults)
 	if err != nil {
 		t.Fatalf("seed source tags: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestSourceTagsSeedPreservesUserChanges(t *testing.T) {
 	reloaded, err := EnsureSourceTags(map[string][]string{
 		"esjzone": {"新的默认标签"},
 		"biquge5": {"简体中文"},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("reload source tags: %v", err)
 	}
@@ -43,75 +43,41 @@ func TestSourceTagsSeedPreservesUserChanges(t *testing.T) {
 	}
 }
 
-func TestSourceTagsMigrationResetsBundledTagsAndPreservesLegacyEdits(t *testing.T) {
-	resetSiteCatalogForTest(t)
-	if err := ensureSiteCatalogDB(); err != nil {
-		t.Fatalf("initialize site catalog: %v", err)
-	}
-
-	legacyRows := []sourceTagEntry{
-		{SiteKey: "esjzone", Tags: `["旧默认标签"]`},
-		{SiteKey: "qidian", Tags: `["我的标签"]`},
-	}
-	if err := siteCatalogDB.Create(&legacyRows).Error; err != nil {
-		t.Fatalf("seed legacy source tags: %v", err)
-	}
-
-	saved, err := EnsureSourceTags(
-		map[string][]string{
-			"esjzone": {"当前默认标签"},
-			"qidian":  {"当前默认标签"},
-		},
-		map[string][]string{
-			"esjzone": {"旧默认标签"},
-			"qidian":  {"旧默认标签"},
-		},
-	)
-	if err != nil {
-		t.Fatalf("migrate source tags: %v", err)
-	}
-	if !reflect.DeepEqual(saved["esjzone"], []string{"当前默认标签"}) {
-		t.Fatalf("expected bundled tags to be updated, got %v", saved["esjzone"])
-	}
-	if !reflect.DeepEqual(saved["qidian"], []string{"我的标签"}) {
-		t.Fatalf("expected legacy custom tags to be preserved, got %v", saved["qidian"])
-	}
-
-	var custom sourceTagEntry
-	if err := siteCatalogDB.Where("site_key = ?", "qidian").Take(&custom).Error; err != nil {
-		t.Fatalf("load migrated custom tags: %v", err)
-	}
-	if !custom.IsCustom || custom.DefaultVersion != sourceTagDefaultsVersion {
-		t.Fatalf("expected legacy edit to be marked custom, got %+v", custom)
-	}
-}
-
-func TestSourceTagsVersion3ResetsBundledV2TagsAndPreservesEdits(t *testing.T) {
+func TestSourceTagsVersion4RefreshesBundledTagsAndPreservesEdits(t *testing.T) {
 	resetSiteCatalogForTest(t)
 	if err := ensureSiteCatalogDB(); err != nil {
 		t.Fatalf("initialize site catalog: %v", err)
 	}
 
 	rows := []sourceTagEntry{
-		{SiteKey: "esjzone", Tags: `["简体中文","轻小说","转载站"]`, DefaultVersion: 2},
-		{SiteKey: "qidian", Tags: `["我的标签"]`, IsCustom: true, DefaultVersion: 2},
+		{SiteKey: "esjzone", Tags: `["轻小说","翻译","成人向"]`, DefaultVersion: 3},
+		{SiteKey: "qidian", Tags: `["我的标签"]`, IsCustom: true, DefaultVersion: 3},
 	}
 	if err := siteCatalogDB.Create(&rows).Error; err != nil {
-		t.Fatalf("seed version 2 source tags: %v", err)
+		t.Fatalf("seed version 3 source tags: %v", err)
 	}
 
 	saved, err := EnsureSourceTags(map[string][]string{
-		"esjzone": {"轻小说", "翻译", "成人向"},
-		"qidian":  {"原创", "男性向", "阅文"},
-	}, nil)
+		"esjzone":  {"轻小说", "成人向"},
+		"qidian":   {"原创", "男性向", "阅文"},
+		"qqreader": {"原创", "阅文"},
+	})
 	if err != nil {
 		t.Fatalf("migrate source tags: %v", err)
 	}
-	if !reflect.DeepEqual(saved["esjzone"], []string{"轻小说", "翻译", "成人向"}) {
-		t.Fatalf("expected bundled v2 tags to be simplified, got %v", saved["esjzone"])
+	if !reflect.DeepEqual(saved["esjzone"], []string{"轻小说", "成人向"}) {
+		t.Fatalf("expected bundled tags to be refreshed, got %v", saved["esjzone"])
 	}
 	if !reflect.DeepEqual(saved["qidian"], []string{"我的标签"}) {
-		t.Fatalf("expected custom v2 tags to be preserved, got %v", saved["qidian"])
+		t.Fatalf("expected custom tags to be preserved, got %v", saved["qidian"])
+	}
+
+	var qqreader sourceTagEntry
+	if err := siteCatalogDB.Where("site_key = ?", "qqreader").Take(&qqreader).Error; err != nil {
+		t.Fatalf("load qqreader tags: %v", err)
+	}
+	if qqreader.Tags != `["原创","阅文"]` || qqreader.DefaultVersion != sourceTagDefaultsVersion {
+		t.Fatalf("expected simplified qqreader tags, got %+v", qqreader)
 	}
 }
 

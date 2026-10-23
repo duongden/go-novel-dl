@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,8 +23,9 @@ import (
 const qqReaderBaseURL = "https://book.qq.com"
 
 var (
-	qqReaderChapterRe = regexp.MustCompile(`^/book-read/(\d+)/(\d+)/?$`)
-	qqReaderBookRe    = regexp.MustCompile(`^/book-(?:detail|chapter)/(\d+)/?$`)
+	qqReaderChapterRe             = regexp.MustCompile(`^/book-read/(\d+)/(\d+)/?$`)
+	qqReaderBookRe                = regexp.MustCompile(`^/book-(?:detail|chapter)/(\d+)/?$`)
+	errQQReaderSearchNoExactMatch = errors.New("qqreader search keyword is not in the searchable keyword index")
 )
 
 type QQReaderSite struct {
@@ -178,6 +180,15 @@ func (s *QQReaderSite) Search(ctx context.Context, keyword string, limit int) ([
 	for pageNo := 1; ; pageNo++ {
 		payload, err := s.fetchSearchPage(ctx, keyword, pageNo, pageSize)
 		if err != nil {
+			if errors.Is(err, errQQReaderSearchNoExactMatch) {
+				return results, nil
+			}
+			// Search can return a valid first page and then fail while advancing.
+			// Keep the books already found instead of reporting the whole source
+			// as unavailable.
+			if len(results) > 0 {
+				return results, nil
+			}
 			return nil, err
 		}
 		for _, item := range payload.Data.BookList {
@@ -327,6 +338,9 @@ func (s *QQReaderSite) fetchSearchPage(ctx context.Context, keyword string, page
 	var envelope qqReaderSearchEnvelope
 	if err := s.getJSON(ctx, endpoint.String(), &envelope); err != nil {
 		return envelope, err
+	}
+	if qqReaderSearchKeywordNotFound(envelope.Msg) {
+		return envelope, errQQReaderSearchNoExactMatch
 	}
 	if err := qqReaderEnvelopeError("search", keyword, envelope.Code, envelope.Msg); err != nil {
 		return envelope, err
@@ -536,6 +550,11 @@ func qqReaderEnvelopeError(kind, identity string, code int, message string) erro
 		message = fmt.Sprintf("code %d", code)
 	}
 	return fmt.Errorf("qqreader %s %s failed: %s", kind, identity, message)
+}
+
+func qqReaderSearchKeywordNotFound(message string) bool {
+	message = strings.TrimSpace(message)
+	return strings.Contains(message, "不在关键词库中")
 }
 
 func qqReaderBookURL(bookID string) string {

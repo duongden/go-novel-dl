@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,7 +13,7 @@ import (
 const (
 	maxSourceTagCount        = 16
 	maxSourceTagRuneSize     = 24
-	sourceTagDefaultsVersion = 3
+	sourceTagDefaultsVersion = 4
 )
 
 type SourceTagRecord struct {
@@ -36,10 +35,7 @@ func (sourceTagEntry) TableName() string {
 }
 
 // EnsureSourceTags upgrades bundled tags while preserving user changes.
-//
-// previousDefaults is only needed for databases created before source tags
-// tracked whether a row had been customized.
-func EnsureSourceTags(defaults, previousDefaults map[string][]string) (map[string][]string, error) {
+func EnsureSourceTags(defaults map[string][]string) (map[string][]string, error) {
 	if err := ensureSiteCatalogDB(); err != nil {
 		return nil, err
 	}
@@ -65,15 +61,6 @@ func EnsureSourceTags(defaults, previousDefaults map[string][]string) (map[strin
 		bundled[siteKey] = normalizedDefault{payload: string(payload)}
 	}
 
-	previous := make(map[string][]string, len(previousDefaults))
-	for siteKey, tags := range previousDefaults {
-		siteKey = strings.ToLower(strings.TrimSpace(siteKey))
-		if siteKey == "" {
-			continue
-		}
-		previous[siteKey] = normalizeSourceTags(tags)
-	}
-
 	var existing []sourceTagEntry
 	if err := siteCatalogDB.Find(&existing).Error; err != nil {
 		return nil, err
@@ -96,22 +83,6 @@ func EnsureSourceTags(defaults, previousDefaults map[string][]string) (map[strin
 		}
 		if entry.IsCustom {
 			continue
-		}
-
-		if entry.DefaultVersion == 0 {
-			legacyTags, knowsLegacyTags := previous[siteKey]
-			if !knowsLegacyTags || !slices.Equal(parseSourceTags(entry.Tags), legacyTags) {
-				if err := siteCatalogDB.Model(&sourceTagEntry{}).
-					Where("site_key = ?", siteKey).
-					Updates(map[string]any{
-						"is_custom":       true,
-						"default_version": sourceTagDefaultsVersion,
-						"updated_at":      time.Now(),
-					}).Error; err != nil {
-					return nil, err
-				}
-				continue
-			}
 		}
 
 		if entry.Tags == item.payload && entry.DefaultVersion == sourceTagDefaultsVersion {

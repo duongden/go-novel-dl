@@ -123,6 +123,49 @@ func TestQQReaderSearchPaginatesAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestQQReaderSearchTreatsUnknownKeywordAsEmptyResult(t *testing.T) {
+	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
+		return qqReaderTestResponse(req, http.StatusOK, `{
+			"code":404,"msg":"不在关键词库中","data":{"pageNo":1,"pageSize":20,"hasNext":false,"bookList":[]}
+		}`), nil
+	})
+
+	results, err := site.Search(context.Background(), "清醒思考", 20)
+	if err != nil {
+		t.Fatalf("a keyword-index miss must not fail the source: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %+v", results)
+	}
+}
+
+func TestQQReaderSearchKeepsResultsWhenLaterPageFails(t *testing.T) {
+	site := newQQReaderTestSite(t, func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Query().Get("pageNo") {
+		case "1":
+			return qqReaderTestResponse(req, http.StatusOK, `{
+				"code":0,"msg":"ok","data":{"pageNo":1,"pageSize":20,"hasNext":true,"bookList":[
+					{"bid":621674,"title":"Partial result","author":"Author","intro":"Intro"}
+				]}
+			}`), nil
+		case "2":
+			return qqReaderTestResponse(req, http.StatusOK, `{
+				"code":500,"msg":"temporary upstream error","data":{}
+			}`), nil
+		default:
+			return qqReaderTestResponse(req, http.StatusBadRequest, `{}`), nil
+		}
+	})
+
+	results, err := site.Search(context.Background(), "book", 20)
+	if err != nil {
+		t.Fatalf("partial search results should be retained: %v", err)
+	}
+	if len(results) != 1 || results[0].BookID != "621674" {
+		t.Fatalf("unexpected partial results: %+v", results)
+	}
+}
+
 func TestQQReaderDownloadPlanFiltersLockedChaptersByDefault(t *testing.T) {
 	site := newQQReaderTestSite(t, qqReaderPlanResponse)
 	book, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "621674"})
@@ -261,9 +304,13 @@ func TestQQReaderRegisteredForSearchAndDownload(t *testing.T) {
 
 func newQQReaderTestSite(t *testing.T, respond func(*http.Request) (*http.Response, error)) *QQReaderSite {
 	t.Helper()
-	site := NewQQReaderSite(config.DefaultConfig().ResolveSiteConfig("qqreader"))
+	site := NewQQReaderSite(testQQReaderConfig())
 	site.client.Transport = qqReaderRoundTripFunc(respond)
 	return site
+}
+
+func testQQReaderConfig() config.ResolvedSiteConfig {
+	return config.DefaultConfig().ResolveSiteConfig("qqreader")
 }
 
 func qqReaderTestResponse(req *http.Request, status int, body string) *http.Response {

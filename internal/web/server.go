@@ -183,7 +183,7 @@ func newService(configPath string) (*Service, error) {
 
 	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
 	defaultSources := defaultAvailableDescriptors(allSources)
-	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources), sourceTagV2Defaults)
+	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources))
 	if err != nil {
 		return nil, fmt.Errorf("initialize source tags: %w", err)
 	}
@@ -237,7 +237,7 @@ func (s *Service) reloadRuntime() error {
 	s.Runtime = runtime
 	s.PageSize = webPageSizeFromConfig(cfg)
 	allSources := searchableDownloadDescriptors(runtime.Registry.SiteDescriptors(runtime.AllSearchSites()))
-	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources), sourceTagV2Defaults)
+	sourceTags, err := config.EnsureSourceTags(sourceTagDefaults(allSources))
 	if err != nil {
 		return err
 	}
@@ -1666,40 +1666,6 @@ func sourceTagDefaults(items []site.SiteDescriptor) map[string][]string {
 		defaults[key] = append([]string(nil), item.Tags...)
 	}
 	return defaults
-}
-
-// sourceTagV2Defaults lets the tag migration distinguish untouched bundled
-// tags from edits made by users of the temporary curated-tag version.
-var sourceTagV2Defaults = map[string][]string{
-	"aaatxt":       {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
-	"alicesw":      {"简体中文", "转载站", "轻小说", "翻译", "成人向", "NSFW"},
-	"biquge345":    {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
-	"biquge5":      {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
-	"buguxs":       {"简体中文", "转载站", "网络小说", "免费"},
-	"ciweimao":     {"简体中文", "原创", "二次元", "轻小说", "同人二创", "付费"},
-	"ciyuanji":     {"简体中文", "原创", "二次元", "轻小说", "付费"},
-	"esjzone":      {"简体中文", "繁体中文", "转载站", "轻小说", "翻译", "成人向", "NSFW"},
-	"faloo":        {"简体中文", "原创", "网络小说", "付费", "飞卢", "男性向"},
-	"fanqienovel":  {"简体中文", "原创", "网络小说", "免费", "番茄小说", "抖音"},
-	"fsshu":        {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
-	"haiwaishubao": {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
-	"ixdzs8":       {"简体中文", "转载站", "网络小说", "免费"},
-	"kadokado":     {"繁体中文", "原创", "轻小说", "付费", "二次元"},
-	"linovel":      {"简体中文", "原创", "轻小说", "付费", "二次元"},
-	"linovelib":    {"简体中文", "转载站", "轻小说", "免费"},
-	"ltxswu":       {"简体中文", "转载站", "网络小说", "免费", "成人向", "NSFW"},
-	"n17k":         {"简体中文", "原创", "网络小说", "付费"},
-	"n8novel":      {"繁体中文", "转载站", "轻小说", "免费"},
-	"novalpie":     {"韩文", "原创", "付费", "网络小说", "成人向", "NSFW"},
-	"novelpia":     {"韩文", "原创", "付费", "网络小说", "成人向", "NSFW"},
-	"qidian":       {"简体中文", "原创", "网络小说", "付费", "起点", "阅文"},
-	"qqreader":     {"简体中文", "原创", "网络小说", "付费", "QQ阅读", "阅文"},
-	"ruochu":       {"简体中文", "原创", "网络小说", "付费", "女性向"},
-	"sfacg":        {"简体中文", "原创", "二次元", "轻小说", "付费"},
-	"shuhaige":     {"简体中文", "转载站", "网络小说", "免费", "笔趣阁"},
-	"tianyabooks":  {"简体中文", "转载站", "经典图书", "免费"},
-	"wenku8":       {"简体中文", "转载站", "轻小说", "免费"},
-	"yibige":       {"简体中文", "繁体中文", "转载站", "网络小说", "免费", "笔趣阁"},
 }
 
 func applySourceTags(items []site.SiteDescriptor, tagsBySource map[string][]string) {

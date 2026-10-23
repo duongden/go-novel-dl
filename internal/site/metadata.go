@@ -62,7 +62,7 @@ var siteMetadata = map[string]SiteMetadata{
 	},
 	"qqreader": {
 		Title: "QQ阅读",
-		Tags:  []string{"原创", "付费", "阅文"},
+		Tags:  []string{"原创", "阅文"},
 	},
 	"fsshu": {
 		Title: "笔趣阁",

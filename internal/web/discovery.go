@@ -23,6 +23,7 @@ const (
 
 var defaultDiscoverySiteKeys = []string{
 	"qidian",
+	"qqreader",
 	"ciweimao",
 	"faloo",
 	"fanqienovel",

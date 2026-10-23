@@ -307,10 +307,17 @@ func TestDefaultDiscoverySitesExcludeUnavailableChannels(t *testing.T) {
 	if explicit {
 		t.Fatal("empty site list should use defaults")
 	}
+	foundQQReader := false
 	for _, siteKey := range sites {
+		if siteKey == "qqreader" {
+			foundQQReader = true
+		}
 		if siteKey == "alphapolis" || siteKey == "kadokado" {
 			t.Fatalf("%s must not be included in default discovery sites: %v", siteKey, sites)
 		}
+	}
+	if !foundQQReader {
+		t.Fatalf("qqreader should be included in default discovery sites: %v", sites)
 	}
 }
 
