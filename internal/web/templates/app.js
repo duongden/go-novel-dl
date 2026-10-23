@@ -2695,6 +2695,14 @@ function renderChapterList(result, variant, chapters, chapterOffset = 0, chapter
       title.className = "chapter-title"; title.textContent = chapter.title || `第 ${chapterOffset + i + 1} 章`;
       content.appendChild(title);
       item.appendChild(number); item.appendChild(content);
+      if (chapter.locked) {
+        item.classList.add("is-locked");
+        const badge = document.createElement("span");
+        badge.className = "chapter-locked-badge";
+        badge.textContent = "付费";
+        badge.title = "付费章节，点开只能看到微信读书提供的试读片段";
+        item.appendChild(badge);
+      }
       item.addEventListener("click", () => {
         void openReaderFromDetail(result, variant, chapter, chapterOffset + i, chapterPage, chapters);
       });
@@ -3412,6 +3420,12 @@ async function renderReaderWindow(centerIndex, options = {}) {
     block.innerHTML = `<div class="reader-error">加载失败：${loadError}</div>`;
   } else {
     renderChapterBlock(block, content);
+    if (ch.locked) {
+      const notice = document.createElement("div");
+      notice.className = "reader-locked-notice";
+      notice.textContent = "该章为付费章节，这里显示的是微信读书提供的试读片段。购买后配置登录 Cookie 才能抓取全文。";
+      block.prepend(notice);
+    }
   }
   if (options.pinLastPage !== undefined) {
     readerState.pinLastPage = Boolean(options.pinLastPage);
@@ -3670,6 +3684,11 @@ function renderReaderCatalog() {
     button.className = "reader-catalog-item";
     if (index === readerState.currentIndex) button.classList.add("is-active");
     button.textContent = `${index + 1}. ${chapter.title || `第 ${index + 1} 章`}`;
+    if (chapter.locked) {
+      button.classList.add("is-locked");
+      button.textContent += "（付费）";
+      button.title = "付费章节，点开只能看到微信读书提供的试读片段";
+    }
     button.addEventListener("click", () => jumpReaderToChapter(index));
     readerCatalogList.appendChild(button);
   });

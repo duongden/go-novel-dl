@@ -10,13 +10,16 @@ type BookRef struct {
 }
 
 type Chapter struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Content    string `json:"content"`
-	URL        string `json:"url,omitempty"`
-	Volume     string `json:"volume,omitempty"`
-	Order      int    `json:"order,omitempty"`
-	Downloaded bool   `json:"downloaded,omitempty"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	URL     string `json:"url,omitempty"`
+	Volume  string `json:"volume,omitempty"`
+	Order   int    `json:"order,omitempty"`
+	// Locked 表示该章在源站属于付费/受限内容：目录里照常展示，但默认不参与下载，
+	// 直接抓取通常只能拿到试读片段。
+	Locked     bool `json:"locked,omitempty"`
+	Downloaded bool `json:"downloaded,omitempty"`
 }
 
 type Book struct {

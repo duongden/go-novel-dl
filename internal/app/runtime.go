@@ -134,12 +134,21 @@ func (r *Runtime) Download(ctx context.Context, siteKey string, books []model.Bo
 			workerCount = 24
 		}
 
+		// 付费/受限章节只在拿到了购买权限（Cookie 或显式 fetch_inaccessible）时才尝试，
+		// 否则服务端只会返回试读片段，写进下载结果反而污染正文。
+		includeLocked := resolved.General.FetchInaccessible || strings.TrimSpace(resolved.Cookie) != ""
 		pending := make([]int, 0, len(book.Chapters))
 		for idx, chapter := range book.Chapters {
 			if chapter.Downloaded && chapter.Content != "" {
 				processedChapters++
 				succeeded++
 				r.Progress.OnBookProgress(processedChapters, len(book.Chapters), chapter.Title)
+				continue
+			}
+			if chapter.Locked && !includeLocked {
+				r.Console.Warnf("跳过付费章节 %s: 未购买只能在阅读页看试读片段", chapter.Title)
+				processedChapters++
+				r.Progress.OnBookProgress(processedChapters, len(book.Chapters), "[付费] "+chapter.Title)
 				continue
 			}
 			pending = append(pending, idx)
@@ -165,6 +174,14 @@ func (r *Runtime) Download(ctx context.Context, siteKey string, books []model.Bo
 							failedChapters++
 							processedChapters++
 							r.Progress.OnBookProgress(processedChapters, len(book.Chapters), "[失败] "+chapter.Title)
+							mu.Unlock()
+							continue
+						}
+						if loaded.Locked {
+							r.Console.Warnf("跳过付费章节 %s: 只返回试读片段，未写入正文", chapter.Title)
+							failedChapters++
+							processedChapters++
+							r.Progress.OnBookProgress(processedChapters, len(book.Chapters), "[试读] "+chapter.Title)
 							mu.Unlock()
 							continue
 						}
@@ -195,6 +212,13 @@ func (r *Runtime) Download(ctx context.Context, siteKey string, books []model.Bo
 			if failedChapters == len(pending) {
 				return results, fmt.Errorf("渠道 %s 的章节抓取全部失败或为空，请检查登录状态/Cookie/章节可见性", siteKey)
 			}
+		}
+
+		// 目录里没拿到正文的付费章节只是占位项，导出前剔除，避免产出空章节标题。
+		if pruned, removed := pruneLockedEmptyChapters(book.Chapters); removed > 0 {
+			r.Console.Warnf("渠道 %s 有 %d 章为未购买的付费章节，只保留在目录中，不写入导出文件", siteKey, removed)
+			book.Chapters = pruned
+			processedChapters = len(book.Chapters)
 		}
 
 		r.Progress.OnBookComplete(processedChapters, len(book.Chapters))
@@ -343,6 +367,29 @@ func bookHasUsableContent(book *model.Book) bool {
 		}
 	}
 	return false
+}
+
+// pruneLockedEmptyChapters 剔除「付费且没拿到正文」的目录占位项，并把保留下来的
+// 章节顺序重新编号。removed 为剔除数量；全部章节都是占位项时原样返回，
+// 交给上层按空内容报错。
+func pruneLockedEmptyChapters(chapters []model.Chapter) ([]model.Chapter, int) {
+	if len(chapters) == 0 {
+		return chapters, 0
+	}
+	kept := make([]model.Chapter, 0, len(chapters))
+	removed := 0
+	for _, chapter := range chapters {
+		if chapter.Locked && !canReuseChapterContent(chapter.Content) {
+			removed++
+			continue
+		}
+		chapter.Order = len(kept) + 1
+		kept = append(kept, chapter)
+	}
+	if removed == 0 || len(kept) == 0 {
+		return chapters, 0
+	}
+	return kept, removed
 }
 
 func (r *Runtime) Search(ctx context.Context, sites []string, keyword string, overallLimit, perSiteLimit int) ([]model.SearchResult, error) {

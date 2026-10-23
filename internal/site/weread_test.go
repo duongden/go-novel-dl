@@ -203,7 +203,7 @@ func wereadReaderPageStub() string {
 		`</script></body></html>`
 }
 
-func TestWeReadDownloadPlanSkipsPaidChapters(t *testing.T) {
+func TestWeReadDownloadPlanListsPaidChaptersAsLocked(t *testing.T) {
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
 		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
 			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
@@ -218,8 +218,15 @@ func TestWeReadDownloadPlanSkipsPaidChapters(t *testing.T) {
 	if book.Title != "Book 201" || book.Author != "Author 201" {
 		t.Fatalf("unexpected book metadata: %+v", book)
 	}
-	if len(book.Chapters) != 1 || book.Chapters[0].ID != "44" {
-		t.Fatalf("paid chapter should be skipped without login, got %+v", book.Chapters)
+	// 目录要列全：付费章节照样返回，只是标记 locked，供详情页展示。
+	if len(book.Chapters) != 2 {
+		t.Fatalf("expected full catalog with paid chapters, got %+v", book.Chapters)
+	}
+	if book.Chapters[0].ID != "44" || book.Chapters[0].Locked {
+		t.Fatalf("free chapter should not be locked: %+v", book.Chapters[0])
+	}
+	if book.Chapters[1].ID != "45" || !book.Chapters[1].Locked {
+		t.Fatalf("paid chapter should be marked locked: %+v", book.Chapters[1])
 	}
 	if !strings.HasPrefix(book.SourceURL, "https://weread.qq.com/web/reader/") {
 		t.Fatalf("unexpected source url: %q", book.SourceURL)
@@ -239,8 +246,8 @@ func TestWeReadDownloadPlanKeepsPaidChaptersWhenUnrestricted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadPlan: %v", err)
 	}
-	if len(book.Chapters) != 2 {
-		t.Fatalf("fetch_inaccessible should keep paid chapters, got %d", len(book.Chapters))
+	if len(book.Chapters) != 2 || !book.Chapters[1].Locked {
+		t.Fatalf("catalog should stay complete and keep locked flags, got %+v", book.Chapters)
 	}
 }
 
@@ -287,7 +294,7 @@ func TestWeReadFetchChapterDecodesPayload(t *testing.T) {
 	}
 }
 
-func TestWeReadFetchChapterRejectsPreviewFragment(t *testing.T) {
+func TestWeReadFetchChapterReturnsPreviewFragmentAsLocked(t *testing.T) {
 	preview := wereadBuildPayloadForTest("<html><body><p>只有一小段试读</p></body>")
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
 		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
@@ -296,9 +303,18 @@ func TestWeReadFetchChapterRejectsPreviewFragment(t *testing.T) {
 		return wereadTestResponse(req, http.StatusOK, preview), nil
 	})
 
-	_, err := site.FetchChapter(context.Background(), "201", model.Chapter{ID: "45", Title: "付费章"})
-	if err == nil || !strings.Contains(err.Error(), "试读") {
-		t.Fatalf("expected preview-fragment error, got %v", err)
+	chapter, err := site.FetchChapter(context.Background(), "201", model.Chapter{ID: "45", Title: "付费章"})
+	if err != nil {
+		t.Fatalf("试读片段应照常返回内容以便阅读，实际报错: %v", err)
+	}
+	if !strings.Contains(chapter.Content, "试读") {
+		t.Fatalf("unexpected preview content: %q", chapter.Content)
+	}
+	if !chapter.Locked {
+		t.Fatal("试读片段必须标记 Locked，否则会被当成正文写入下载结果")
+	}
+	if chapter.Downloaded {
+		t.Fatal("试读片段不应标记为已下载")
 	}
 }
 

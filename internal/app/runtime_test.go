@@ -249,3 +249,30 @@ func (s cacheTestSite) Search(ctx context.Context, keyword string, limit int) ([
 func (s cacheTestSite) ResolveURL(rawURL string) (*site.ResolvedURL, bool) {
 	return nil, false
 }
+
+func TestPruneLockedEmptyChapters(t *testing.T) {
+	chapters := []model.Chapter{
+		{ID: "1", Title: "免费章", Order: 1, Content: "正文", Downloaded: true},
+		{ID: "2", Title: "付费章", Order: 2, Locked: true},
+		{ID: "3", Title: "已购付费章", Order: 3, Locked: true, Content: "正文", Downloaded: true},
+		{ID: "4", Title: "免费章二", Order: 4, Content: "正文", Downloaded: true},
+	}
+
+	kept, removed := pruneLockedEmptyChapters(chapters)
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if len(kept) != 3 || kept[1].ID != "3" || kept[2].ID != "4" {
+		t.Fatalf("unexpected kept chapters: %+v", kept)
+	}
+	for idx, chapter := range kept {
+		if chapter.Order != idx+1 {
+			t.Fatalf("chapter order should be renumbered, got %d at index %d", chapter.Order, idx)
+		}
+	}
+
+	allLocked := []model.Chapter{{ID: "1", Locked: true}, {ID: "2", Locked: true}}
+	if got, removed := pruneLockedEmptyChapters(allLocked); removed != 0 || len(got) != 2 {
+		t.Fatalf("all-locked catalog should be left untouched, got %+v removed=%d", got, removed)
+	}
+}

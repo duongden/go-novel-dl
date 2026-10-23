@@ -333,9 +333,9 @@ func (s *WeReadSite) Search(ctx context.Context, keyword string, limit int) ([]m
 	return results, nil
 }
 
-// DownloadPlan 拉取阅读页的章节目录，默认只保留可读的免费章节。
-// 未登录时付费章节只能拿到试读片段，因此默认跳过；配置 Cookie 或
-// fetch_inaccessible 后才纳入，由 FetchChapter 判断实际拿到的是不是全文。
+// DownloadPlan 拉取阅读页的章节目录，返回目录的全部章节。
+// 付费章节会标记 Locked=true：目录里照常展示（网页详情页需要列出它们），
+// 但默认不参与下载；真正抓取时若没有购买权限只能拿到试读片段。
 func (s *WeReadSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*model.Book, error) {
 	readerID, err := wereadResolveReaderID(ref.BookID)
 	if err != nil {
@@ -349,7 +349,6 @@ func (s *WeReadSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 		return nil, fmt.Errorf("微信读书书籍 %s 的章节目录为空，可能已下架或需要登录", ref.BookID)
 	}
 
-	includeLocked := s.cfg.General.FetchInaccessible || s.hasCookie()
 	chapters := make([]model.Chapter, 0, len(state.ChapterInfos))
 	for _, item := range state.ChapterInfos {
 		if item.ChapterUID == 0 {
@@ -361,9 +360,6 @@ func (s *WeReadSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 		}
 		// 免费章节 price 恒为 0；付费章节为 -1（整本购买）或正数（按章购买）。
 		free := item.Price == 0 && item.Paid == 0
-		if !free && !includeLocked {
-			continue
-		}
 		chapterID := strconv.FormatInt(item.ChapterUID, 10)
 		chapters = append(chapters, model.Chapter{
 			ID:     chapterID,
@@ -371,12 +367,12 @@ func (s *WeReadSite) DownloadPlan(ctx context.Context, ref model.BookRef) (*mode
 			URL:    fmt.Sprintf("%s/web/reader/%s", wereadBaseURL, readerID),
 			Order:  len(chapters) + 1,
 			Volume: wereadVolumeLabel(item.Level),
+			Locked: !free,
 		})
 	}
 	if len(chapters) == 0 {
-		return nil, fmt.Errorf(
-			"微信读书《%s》的 %d 章全部为付费内容，未登录只能读试读片段；配置登录 Cookie 或开启 fetch_inaccessible 后重试",
-			cleanText(state.BookInfo.Title), len(state.ChapterInfos))
+		return nil, fmt.Errorf("微信读书《%s》没有可用章节，可能已下架或需要登录",
+			cleanText(state.BookInfo.Title))
 	}
 
 	bookID := strings.TrimSpace(state.BookInfo.BookID)
@@ -444,33 +440,54 @@ func (s *WeReadSite) FetchChapter(ctx context.Context, bookID string, chapter mo
 	if content == "" {
 		return chapter, fmt.Errorf("微信读书章节 %s 解码后没有正文", chapter.ID)
 	}
-	if !wereadLooksLikeFullDocument(markup) {
-		return chapter, fmt.Errorf(
-			"微信读书章节 %s《%s》只返回试读片段（约 %d 字），需要在微信读书购买该章后才能下载全文",
-			chapter.ID, chapter.Title, len([]rune(content)))
-	}
 
 	chapter.ID = strconv.FormatInt(chapterUID, 10)
 	chapter.Content = content
 	chapter.URL = fmt.Sprintf("%s/web/reader/%s", wereadBaseURL, readerID)
+	// 付费章节未购买时服务端只回试读片段（不是完整文档）。这时照常返回内容，
+	// 让阅读页可以展示试读，但用 Locked 标记它并不是全文，下载流程不把它当作正文。
+	if !wereadLooksLikeFullDocument(markup) {
+		chapter.Locked = true
+		chapter.Downloaded = false
+		return chapter, nil
+	}
+	chapter.Locked = false
 	chapter.Downloaded = true
 	return chapter, nil
 }
 
 func (s *WeReadSite) Download(ctx context.Context, ref model.BookRef) (*model.Book, error) {
-	book, err := s.DownloadPlan(ctx, ref)
+	plan, err := s.DownloadPlan(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	for idx, chapter := range book.Chapters {
-		loaded, err := s.FetchChapter(ctx, book.ID, chapter)
+	// 目录里保留付费章节只是为了展示；没有购买权限时抓到的只是试读片段，
+	// 不作为正文写进下载结果。
+	includeLocked := s.cfg.General.FetchInaccessible || s.hasCookie()
+	chapters := make([]model.Chapter, 0, len(plan.Chapters))
+	for _, chapter := range plan.Chapters {
+		if chapter.Locked && !includeLocked {
+			continue
+		}
+		loaded, err := s.FetchChapter(ctx, plan.ID, chapter)
 		if err != nil {
 			return nil, fmt.Errorf("微信读书抓取章节 %s: %w", chapter.ID, err)
 		}
-		loaded.Order = idx + 1
-		book.Chapters[idx] = loaded
+		// FetchChapter 返回 Locked 说明拿到的只是试读片段（常见于未购买付费章节）。
+		if loaded.Locked {
+			return nil, fmt.Errorf(
+				"微信读书章节 %s《%s》只返回试读片段，需要先在微信读书购买该章后才能下载全文",
+				chapter.ID, chapter.Title)
+		}
+		loaded.Order = len(chapters) + 1
+		chapters = append(chapters, loaded)
 	}
-	return book, nil
+	if len(chapters) == 0 {
+		return nil, fmt.Errorf("微信读书《%s》没有可下载的免费章节；付费章节需要在微信读书购买后配置登录 Cookie 才能下载",
+			plan.Title)
+	}
+	plan.Chapters = chapters
+	return plan, nil
 }
 
 // readerState 拉取并缓存阅读页状态（psvts、书籍信息、章节目录）。
