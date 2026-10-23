@@ -406,28 +406,28 @@ func TestFanqieChapterNumber(t *testing.T) {
 }
 
 func TestFanqieSearchParsesResults(t *testing.T) {
-	var gotQuery, gotPageCount, gotPageIndex, gotQueryType, gotFilter string
-	var gotAccept, gotReferer, gotFetchSite string
+	var gotQuery, gotAID, gotOffset string
+	var gotAccept, gotReferer, gotFetchSite, gotUserAgent string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/author/search/search_book/v1" {
+		if r.URL.Path != "/api/novel/channel/homepage/search/search/v1/" {
 			t.Errorf("unexpected search path: %s", r.URL.Path)
 		}
-		gotQuery = r.URL.Query().Get("query_word")
-		gotPageCount = r.URL.Query().Get("page_count")
-		gotPageIndex = r.URL.Query().Get("page_index")
-		gotQueryType = r.URL.Query().Get("query_type")
-		gotFilter = r.URL.Query().Get("filter")
+		gotQuery = r.URL.Query().Get("q")
+		gotAID = r.URL.Query().Get("aid")
+		gotOffset = r.URL.Query().Get("offset")
 		gotAccept = r.Header.Get("Accept")
 		gotReferer = r.Header.Get("Referer")
 		gotFetchSite = r.Header.Get("Sec-Fetch-Site")
+		gotUserAgent = r.Header.Get("User-Agent")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{
 			"code": 0,
 			"data": {
-				"total_count": 2,
-				"search_book_data_list": [
-					{"book_id":"123","book_name":"Test Book","author":"Auth","book_abstract":"Desc","thumb_url":"http://img","last_chapter_title":"Latest"},
-					{"bookId":"456","bookName":"Second","author_name":"B","bookAbstract":"Second desc","thumb_uri":"covers/second.jpg","lastChapterTitle":"Second latest"}
+				"has_more": false,
+				"offset": 10,
+				"ret_data": [
+					{"book_id":"123","title":"Test Book","author":"Auth","abstract":"Desc","thumb_url":"http://img"},
+					{"book_id":"456","title":"Second","author":"B","thumb_url":"covers/second.jpg"}
 				]
 			}
 		}`)
@@ -437,20 +437,20 @@ func TestFanqieSearchParsesResults(t *testing.T) {
 	site := &FanqieNovelSite{
 		cfg:       config.DefaultConfig().ResolveSiteConfig("fanqienovel"),
 		client:    server.Client(),
-		searchURL: server.URL + "/api/author/search/search_book/v1",
+		searchURL: server.URL + "/api/novel/channel/homepage/search/search/v1/",
 	}
 	results, err := site.Search(context.Background(), "hello", 5)
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
 	if gotQuery != "hello" {
-		t.Fatalf("unexpected query_word: %q", gotQuery)
+		t.Fatalf("unexpected q: %q", gotQuery)
 	}
-	if gotPageCount != "10" || gotPageIndex != "0" || gotQueryType != "0" || gotFilter != "127,127,127,127" {
-		t.Fatalf("unexpected official search params: count=%q index=%q type=%q filter=%q", gotPageCount, gotPageIndex, gotQueryType, gotFilter)
+	if gotAID != "1967" || gotOffset != "0" {
+		t.Fatalf("unexpected official search params: aid=%q offset=%q", gotAID, gotOffset)
 	}
-	if gotAccept == "" || gotReferer != "https://fanqienovel.com/search/hello" || gotFetchSite != "same-origin" {
-		t.Fatalf("unexpected official search headers: accept=%q referer=%q fetch-site=%q", gotAccept, gotReferer, gotFetchSite)
+	if gotAccept == "" || gotUserAgent != fanqieSearchUserAgent || gotReferer != "" || gotFetchSite != "" {
+		t.Fatalf("unexpected official search headers: accept=%q user-agent=%q referer=%q fetch-site=%q", gotAccept, gotUserAgent, gotReferer, gotFetchSite)
 	}
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -461,8 +461,8 @@ func TestFanqieSearchParsesResults(t *testing.T) {
 	if results[0].URL != "https://fanqienovel.com/page/123" {
 		t.Fatalf("unexpected URL: %q", results[0].URL)
 	}
-	if results[0].LatestChapter != "Latest" {
-		t.Fatalf("unexpected latest chapter: %q", results[0].LatestChapter)
+	if results[0].Description != "Desc" {
+		t.Fatalf("unexpected description: %q", results[0].Description)
 	}
 	if results[1].CoverURL != "https://p3-reading-sign.fqnovelpic.com/covers/second.jpg" {
 		t.Fatalf("unexpected cover: %q", results[1].CoverURL)
@@ -475,11 +475,12 @@ func TestFanqieSearchHonorsLimit(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{
 			"code": 0,
 			"data": {
-				"total_count": 3,
-				"search_book_data_list": [
-					{"book_id":"1","book_name":"A"},
-					{"book_id":"2","book_name":"B"},
-					{"book_id":"3","book_name":"C"}
+				"has_more": false,
+				"offset": 10,
+				"ret_data": [
+					{"book_id":"1","title":"A"},
+					{"book_id":"2","title":"B"},
+					{"book_id":"3","title":"C"}
 				]
 			}
 		}`)
@@ -496,29 +497,114 @@ func TestFanqieSearchHonorsLimit(t *testing.T) {
 	}
 }
 
-func TestFanqieSearchReportsOfficialVerificationWithoutLeakingCookie(t *testing.T) {
+func TestFanqieSearchUsesResponseOffsetForPagination(t *testing.T) {
+	var offsets []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("bdturing-verify", `{"type":"verify","subtype":"slide"}`)
-		w.WriteHeader(http.StatusOK)
+		offset := r.URL.Query().Get("offset")
+		offsets = append(offsets, offset)
+		start, count, hasMore, nextOffset := 0, 10, true, 10
+		if offset == "10" {
+			start, count, hasMore, nextOffset = 10, 11, false, 20
+		}
+		books := make([]string, 0, count-start)
+		for i := start; i < count; i++ {
+			books = append(books, fmt.Sprintf(`{"book_id":"%d","title":"Book %d"}`, i+1, i+1))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"code":0,"data":{"has_more":%t,"offset":%d,"ret_data":[%s]}}`,
+			hasMore, nextOffset, strings.Join(books, ","))
 	}))
 	defer server.Close()
+
+	site := &FanqieNovelSite{client: server.Client(), searchURL: server.URL}
+	results, err := site.Search(context.Background(), "page", 11)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if got := strings.Join(offsets, ","); got != "0,10" {
+		t.Fatalf("unexpected search offsets: %q", got)
+	}
+	if len(results) != 11 {
+		t.Fatalf("expected 11 results, got %d", len(results))
+	}
+}
+
+func TestFanqieSearchFallsBackToAlternateEndpoint(t *testing.T) {
+	primaryCalls := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primary.Close()
+
+	fallbackCalls := 0
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"code":0,"data":{"has_more":false,"offset":10,"ret_data":[{"book_id":"fallback-book","title":"Fallback"}]}}`)
+	}))
+	defer fallback.Close()
+
+	site := &FanqieNovelSite{
+		client:            primary.Client(),
+		searchURL:         primary.URL,
+		searchFallbackURL: fallback.URL,
+	}
+	results, err := site.Search(context.Background(), "fallback", 1)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if primaryCalls != 1 || fallbackCalls != 1 {
+		t.Fatalf("unexpected endpoint calls: primary=%d fallback=%d", primaryCalls, fallbackCalls)
+	}
+	if len(results) != 1 || results[0].BookID != "fallback-book" {
+		t.Fatalf("unexpected fallback results: %+v", results)
+	}
+}
+
+func TestFanqieSearchReturnsEmptyWhenNoMoreResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"code":0,"data":{"has_more":false,"offset":0}}`)
+	}))
+	defer server.Close()
+
+	site := &FanqieNovelSite{client: server.Client(), searchURL: server.URL}
+	results, err := site.Search(context.Background(), "missing", 10)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %+v", results)
+	}
+}
+
+func TestFanqieSearchReportsUnavailableWithoutLeakingCookie(t *testing.T) {
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer primary.Close()
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fallback.Close()
 
 	cfg := config.DefaultConfig().ResolveSiteConfig("fanqienovel")
 	cfg.Cookie = "sessionid=top-secret-cookie"
 	site := &FanqieNovelSite{
-		cfg:       cfg,
-		client:    server.Client(),
-		html:      NewHTMLSite(server.Client()),
-		searchURL: server.URL,
+		cfg:               cfg,
+		client:            primary.Client(),
+		searchURL:         primary.URL,
+		searchFallbackURL: fallback.URL,
 	}
 	_, err := site.Search(context.Background(), "hello", 5)
 	if err == nil {
-		t.Fatal("expected verification error")
+		t.Fatal("expected unavailable error")
 	}
-	if !strings.Contains(err.Error(), "安全验证") || !strings.Contains(err.Error(), "Cookie") {
-		t.Fatalf("error should explain verification and Cookie configuration: %v", err)
+	if !strings.Contains(err.Error(), "暂时不可用") || !strings.Contains(err.Error(), "空响应") {
+		t.Fatalf("error should explain that the official search is unavailable: %v", err)
 	}
-	if strings.Contains(err.Error(), "top-secret-cookie") {
+	if strings.Contains(strings.ToLower(err.Error()), "cookie") || strings.Contains(err.Error(), "top-secret-cookie") {
 		t.Fatalf("error leaked configured Cookie: %v", err)
 	}
 }
@@ -660,10 +746,24 @@ func TestFanqieCookieIsScopedToOfficialDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	search, err := url.Parse(fanqieSearchAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := url.Parse(fanqieSearchFallbackAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cookies := site.client.Jar.Cookies(official); len(cookies) != 2 {
 		t.Fatalf("expected two official-domain cookies, got %v", cookies)
 	}
 	if cookies := site.client.Jar.Cookies(other); len(cookies) != 0 {
 		t.Fatalf("Cookie leaked outside fanqienovel.com: %v", cookies)
+	}
+	if cookies := site.client.Jar.Cookies(search); len(cookies) != 0 {
+		t.Fatalf("Cookie leaked to the search endpoint: %v", cookies)
+	}
+	if cookies := site.client.Jar.Cookies(fallback); len(cookies) != 0 {
+		t.Fatalf("Cookie leaked to the fallback endpoint: %v", cookies)
 	}
 }

@@ -36,7 +36,9 @@ var (
 )
 
 const (
-	fanqieSearchAPI              = "https://fanqienovel.com/api/author/search/search_book/v1"
+	fanqieSearchAPI              = "https://novel.snssdk.com/api/novel/channel/homepage/search/search/v1/"
+	fanqieSearchFallbackAPI      = "https://api-lf.fanqiesdk.com/api/novel/channel/homepage/search/search/v1/"
+	fanqieSearchUserAgent        = "com.dragon.read/68132 (Linux; U; Android 10; zh_CN; OnePlus11; Build/V291IR;tt-ok/3.12.13.4-tiktok)"
 	fanqieReaderURL              = "https://fanqienovel.com/reader/"
 	fanqieDirectoryAPI           = "https://fanqienovel.com/api/reader/directory/detail"
 	fanqieDirectoryMinInterval   = 800 * time.Millisecond
@@ -53,6 +55,7 @@ type FanqieNovelSite struct {
 	html              HTMLSite
 	client            *http.Client
 	searchURL         string
+	searchFallbackURL string
 	directoryURL      string
 	rankPageURL       string
 	rankRecommendURL  string
@@ -75,6 +78,7 @@ func NewFanqieNovelSite(cfg config.ResolvedSiteConfig) *FanqieNovelSite {
 		client:    client,
 		searchURL: fanqieSearchAPI,
 
+		searchFallbackURL: fanqieSearchFallbackAPI,
 		directoryURL:      fanqieDirectoryAPI,
 		rankPageURL:       "https://fanqienovel.com/rank",
 		rankRecommendURL:  "https://fanqienovel.com/api/rank/recommend/list",
@@ -642,67 +646,18 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 	if maxPages > 10 {
 		maxPages = 10
 	}
-	searchURL := strings.TrimSpace(s.searchURL)
-	if searchURL == "" {
-		searchURL = fanqieSearchAPI
+	endpoints := s.fanqieSearchEndpoints()
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("番茄官方搜索暂不可用：未配置搜索地址")
 	}
-	referer := "https://fanqienovel.com/search/" + url.PathEscape(keyword)
+	offset := int64(0)
 	for pageIndex := 0; pageIndex < maxPages && len(results) < limit; pageIndex++ {
-		parsedEndpoint, err := url.Parse(searchURL)
-		if err != nil {
-			return nil, err
-		}
-		query := parsedEndpoint.Query()
-		query.Set("query_word", keyword)
-		query.Set("page_count", strconv.Itoa(pageSize))
-		query.Set("page_index", strconv.Itoa(pageIndex))
-		query.Set("query_type", "0")
-		query.Set("filter", "127,127,127,127")
-		parsedEndpoint.RawQuery = query.Encode()
-
-		body, responseHeaders, err := s.getJSONResponse(ctx, parsedEndpoint.String(), referer, map[string]string{
-			"Sec-Fetch-Site": "same-origin",
-			"Sec-Fetch-Mode": "cors",
-			"Sec-Fetch-Dest": "empty",
-		})
+		payload, err := s.fetchFanqieSearchPayload(ctx, endpoints, keyword, offset)
 		if err != nil {
 			if len(results) > 0 {
 				break
 			}
 			return nil, err
-		}
-		if strings.TrimSpace(string(body)) == "" {
-			if responseHeaders.Get("bdturing-verify") != "" || responseHeaders.Get("x-vc-bdturing-parameters") != "" {
-				if len(results) > 0 {
-					break
-				}
-				return nil, fmt.Errorf("番茄官方搜索触发安全验证，请先在 fanqienovel.com 完成验证，并在 fanqienovel 渠道配置有效 Cookie 后重试")
-			}
-			if len(results) > 0 {
-				break
-			}
-			return nil, fmt.Errorf("番茄官方搜索返回空响应，请稍后重试；如持续出现，请配置有效的 fanqienovel Cookie")
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			if len(results) > 0 {
-				break
-			}
-			return nil, err
-		}
-		code := int64Value(payload["code"])
-		if code == -5 {
-			return results, nil
-		}
-		if code != 0 {
-			if len(results) > 0 {
-				break
-			}
-			message := firstNonEmptyString(stringValue(payload["message"]), stringValue(payload["msg"]))
-			if message == "" {
-				message = "unknown error"
-			}
-			return nil, fmt.Errorf("fanqienovel official search api: %s", message)
 		}
 		data := mapValue(payload, "data")
 		if data == nil {
@@ -722,17 +677,124 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 				return results, nil
 			}
 		}
-		total := int64Value(data["total_count"])
-		if len(results) == before || len(books) < pageSize || (total > 0 && int64((pageIndex+1)*pageSize) >= total) {
+		if len(results) == before || len(books) == 0 || !fanqieSearchHasMore(data, len(books), pageSize) {
 			break
 		}
+		nextOffset := int64Value(data["offset"])
+		if nextOffset <= offset {
+			nextOffset = offset + int64(len(books))
+		}
+		if nextOffset <= offset {
+			break
+		}
+		offset = nextOffset
 	}
 	return results, nil
 }
 
+func (s *FanqieNovelSite) fanqieSearchEndpoints() []string {
+	if s == nil {
+		return nil
+	}
+	candidates := []string{s.searchURL, s.searchFallbackURL}
+	if strings.TrimSpace(s.searchURL) == "" && strings.TrimSpace(s.searchFallbackURL) == "" {
+		candidates = []string{fanqieSearchAPI, fanqieSearchFallbackAPI}
+	}
+	endpoints := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		endpoints = append(endpoints, candidate)
+	}
+	return endpoints
+}
+
+func (s *FanqieNovelSite) fetchFanqieSearchPayload(
+	ctx context.Context,
+	endpoints []string,
+	keyword string,
+	offset int64,
+) (map[string]any, error) {
+	var lastErr error
+	for _, endpoint := range endpoints {
+		rawURL, err := fanqieSearchURL(endpoint, keyword, offset)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, _, err := s.getJSONResponse(ctx, rawURL, "", map[string]string{
+			"User-Agent": fanqieSearchUserAgent,
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+		if strings.TrimSpace(string(body)) == "" {
+			lastErr = fmt.Errorf("官方搜索端点返回空响应")
+			continue
+		}
+		var payload map[string]any
+		if err := decodeFanqieJSONObject(string(body), &payload); err != nil {
+			lastErr = err
+			continue
+		}
+		code := int64Value(payload["code"])
+		if code == -5 {
+			return payload, nil
+		}
+		if code != 0 {
+			message := firstNonEmptyString(stringValue(payload["message"]), stringValue(payload["msg"]))
+			if message == "" {
+				message = "unknown error"
+			}
+			lastErr = fmt.Errorf("fanqienovel official search api: %s", message)
+			continue
+		}
+		if mapValue(payload, "data") == nil {
+			lastErr = fmt.Errorf("官方搜索端点响应缺少 data")
+			continue
+		}
+		return payload, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("未收到官方搜索响应")
+	}
+	return nil, fmt.Errorf("番茄官方搜索暂时不可用：%w", lastErr)
+}
+
+func fanqieSearchURL(endpoint, keyword string, offset int64) (string, error) {
+	parsedEndpoint, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return "", err
+	}
+	query := parsedEndpoint.Query()
+	query.Set("aid", "1967")
+	query.Set("offset", strconv.FormatInt(offset, 10))
+	query.Set("q", keyword)
+	parsedEndpoint.RawQuery = query.Encode()
+	return parsedEndpoint.String(), nil
+}
+
+func fanqieSearchHasMore(data map[string]any, resultCount, pageSize int) bool {
+	if rawHasMore, ok := data["has_more"]; ok {
+		return boolValue(rawHasMore)
+	}
+	return resultCount >= pageSize
+}
+
 func fanqieSearchBookList(data map[string]any) []any {
 	for _, key := range []string{
-		"search_book_data_list", "searchBookList", "book_data_list", "bookDataList",
+		"ret_data", "search_book_data_list", "searchBookList", "book_data_list", "bookDataList",
 		"book_list", "bookList", "books", "list",
 	} {
 		if books := sliceValue(data[key]); len(books) > 0 {
@@ -1411,14 +1473,14 @@ func stringValue(value any) string {
 	switch v := value.(type) {
 	case string:
 		return strings.TrimSpace(v)
+	case json.Number:
+		return v.String()
 	case fmt.Stringer:
 		return strings.TrimSpace(v.String())
 	case int64:
 		return strconv.FormatInt(v, 10)
 	case float64:
 		return strconv.FormatInt(int64(v), 10)
-	case json.Number:
-		return v.String()
 	default:
 		if value == nil {
 			return ""
@@ -1437,6 +1499,9 @@ func boolValue(value any) bool {
 		return v != 0
 	case int64:
 		return v != 0
+	case json.Number:
+		i, err := v.Int64()
+		return err == nil && i != 0
 	default:
 		return false
 	}
