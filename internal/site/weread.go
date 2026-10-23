@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ const wereadBaseURL = "https://weread.qq.com"
 
 type WeReadSite struct {
 	client *http.Client
+	cfg    config.ResolvedSiteConfig
 }
 
 type wereadBookInfo struct {
@@ -132,17 +134,25 @@ func NewWeReadSite(cfg config.ResolvedSiteConfig) *WeReadSite {
 	if cfg.General.Timeout > 0 {
 		timeout = time.Duration(cfg.General.Timeout * float64(time.Second))
 	}
-	client := newSiteHTTPClient(timeout, siteHTTPClientOptions{})
-	return &WeReadSite{
+	jar, _ := cookiejar.New(nil)
+	client := newSiteHTTPClient(timeout, siteHTTPClientOptions{Jar: jar})
+	site := &WeReadSite{
 		client: client,
+		cfg:    cfg,
 	}
+	site.injectCookieString(cfg.Cookie)
+	return site
 }
 
 func (s *WeReadSite) Key() string         { return "weread" }
 func (s *WeReadSite) DisplayName() string { return "微信读书" }
 
 func (s *WeReadSite) Capabilities() Capabilities {
-	return Capabilities{Search: true, Download: false, Login: false}
+	return Capabilities{
+		Search:   true,
+		Download: false,
+		Login:    s.hasCookie(),
+	}
 }
 
 func (s *WeReadSite) DiscoveryLists(ctx context.Context) ([]DiscoveryList, error) {
@@ -269,15 +279,15 @@ func (s *WeReadSite) Search(ctx context.Context, keyword string, limit int) ([]m
 }
 
 func (s *WeReadSite) DownloadPlan(context.Context, model.BookRef) (*model.Book, error) {
-	return nil, wereadDownloadUnsupportedError()
+	return nil, s.downloadUnsupportedError()
 }
 
 func (s *WeReadSite) FetchChapter(context.Context, string, model.Chapter) (model.Chapter, error) {
-	return model.Chapter{}, wereadDownloadUnsupportedError()
+	return model.Chapter{}, s.downloadUnsupportedError()
 }
 
 func (s *WeReadSite) Download(context.Context, model.BookRef) (*model.Book, error) {
-	return nil, wereadDownloadUnsupportedError()
+	return nil, s.downloadUnsupportedError()
 }
 
 func (s *WeReadSite) SearchTag(ctx context.Context, tag string, limit int) ([]model.SearchResult, error) {
@@ -293,8 +303,52 @@ func (s *WeReadSite) ResolveURL(string) (*ResolvedURL, bool) {
 	return nil, false
 }
 
-func wereadDownloadUnsupportedError() error {
-	return fmt.Errorf("微信读书当前仅支持公开搜索与排行榜；正文需要登录和版权权限，未启用下载")
+func (s *WeReadSite) hasCookie() bool {
+	return s != nil && strings.TrimSpace(s.cfg.Cookie) != ""
+}
+
+func (s *WeReadSite) downloadUnsupportedError() error {
+	if s != nil && s.hasCookie() {
+		return fmt.Errorf("微信读书未启用下载：已配置 Cookie 并用于登录态请求，但网页端正文由服务端签名保护，不能作为普通文本导出；搜索与排行榜仍可用")
+	}
+	return fmt.Errorf("微信读书未启用下载：正文需要登录和版权权限；当前未配置 Cookie，搜索与排行榜仍可用")
+}
+
+func (s *WeReadSite) injectCookieString(raw string) {
+	if s == nil || s.client == nil {
+		return
+	}
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= len("Cookie:") && strings.EqualFold(raw[:len("Cookie:")], "Cookie:") {
+		raw = strings.TrimSpace(raw[len("Cookie:"):])
+	}
+	if raw == "" {
+		return
+	}
+	if s.client.Jar == nil {
+		jar, _ := cookiejar.New(nil)
+		s.client.Jar = jar
+	}
+	base, err := url.Parse(wereadBaseURL)
+	if err != nil {
+		return
+	}
+	cookies := make([]*http.Cookie, 0)
+	for _, part := range strings.Split(raw, ";") {
+		parts := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{
+			Name:   strings.TrimSpace(parts[0]),
+			Value:  strings.TrimSpace(parts[1]),
+			Path:   "/",
+			Domain: ".weread.qq.com",
+		})
+	}
+	if len(cookies) > 0 {
+		s.client.Jar.SetCookies(base, cookies)
+	}
 }
 
 func (s *WeReadSite) getJSON(ctx context.Context, rawURL, referer string, target any) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -106,12 +107,67 @@ func TestWeReadIsSearchOnly(t *testing.T) {
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
 		return wereadTestResponse(req, http.StatusInternalServerError, `{}`), nil
 	})
-	if capabilities := site.Capabilities(); !capabilities.Search || capabilities.Download {
+	if capabilities := site.Capabilities(); !capabilities.Search || capabilities.Download || capabilities.Login {
 		t.Fatalf("unexpected capabilities: %+v", capabilities)
 	}
 	if _, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "201"}); err == nil ||
-		!strings.Contains(err.Error(), "未启用下载") {
+		!strings.Contains(err.Error(), "未启用下载") || !strings.Contains(err.Error(), "未配置 Cookie") {
 		t.Fatalf("expected an explicit download limitation, got %v", err)
+	}
+}
+
+func TestWeReadConfiguredCookieIsScopedAndKeptOutOfErrors(t *testing.T) {
+	const (
+		sessionCookie = "session-test-value"
+		readerCookie  = "reader-test-value"
+	)
+	cfg := config.DefaultConfig()
+	cfg.Sites["weread"] = config.SiteConfig{
+		Cookie: "Cookie: wr_skey=" + sessionCookie + "; wr_vid=" + readerCookie,
+	}
+	site := NewWeReadSite(cfg.ResolveSiteConfig("weread"))
+	if capabilities := site.Capabilities(); !capabilities.Login {
+		t.Fatalf("configured cookie should advertise login capability: %+v", capabilities)
+	}
+
+	base, err := url.Parse(wereadBaseURL)
+	if err != nil {
+		t.Fatalf("parse base URL: %v", err)
+	}
+	other, err := url.Parse("https://example.com/")
+	if err != nil {
+		t.Fatalf("parse other URL: %v", err)
+	}
+	if cookies := site.client.Jar.Cookies(base); len(cookies) != 2 {
+		t.Fatalf("expected two scoped cookies, got %d", len(cookies))
+	}
+	if cookies := site.client.Jar.Cookies(other); len(cookies) != 0 {
+		t.Fatalf("cookies leaked outside weread domain: %v", cookies)
+	}
+
+	var gotCookie string
+	site.client.Transport = wereadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		gotCookie = req.Header.Get("Cookie")
+		return wereadTestResponse(req, http.StatusOK, `{"books":[],"hasMore":0}`), nil
+	})
+	if _, err := site.Search(context.Background(), "小说", 5); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if !strings.Contains(gotCookie, "wr_skey="+sessionCookie) ||
+		!strings.Contains(gotCookie, "wr_vid="+readerCookie) {
+		t.Fatalf("configured cookies were not sent to weread: %q", gotCookie)
+	}
+
+	_, err = site.FetchChapter(context.Background(), "book", model.Chapter{ID: "chapter"})
+	if err == nil {
+		t.Fatal("expected protected chapter download to remain disabled")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "服务端签名保护") || !strings.Contains(message, "未启用下载") {
+		t.Fatalf("unexpected configured-cookie limitation: %v", err)
+	}
+	if strings.Contains(message, sessionCookie) || strings.Contains(message, readerCookie) {
+		t.Fatalf("download error leaked cookie data: %v", err)
 	}
 }
 
