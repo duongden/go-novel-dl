@@ -36,8 +36,8 @@ var (
 )
 
 const (
-	fanqieSearchAPI              = "http://101.35.133.34:5000/api/search"
-	fanqieChapterAPI             = "http://101.35.133.34:5000/api/raw_full"
+	fanqieSearchAPI              = "https://fanqienovel.com/api/author/search/search_book/v1"
+	fanqieReaderURL              = "https://fanqienovel.com/reader/"
 	fanqieDirectoryAPI           = "https://fanqienovel.com/api/reader/directory/detail"
 	fanqieDirectoryMinInterval   = 800 * time.Millisecond
 	fanqieDirectoryCacheFileName = "directory.json"
@@ -69,7 +69,7 @@ func NewFanqieNovelSite(cfg config.ResolvedSiteConfig) *FanqieNovelSite {
 	}
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Timeout: timeout, Jar: jar}
-	return &FanqieNovelSite{
+	site := &FanqieNovelSite{
 		cfg:       cfg,
 		html:      NewHTMLSite(client),
 		client:    client,
@@ -81,12 +81,51 @@ func NewFanqieNovelSite(cfg config.ResolvedSiteConfig) *FanqieNovelSite {
 		rankCategoryURL:   "https://fanqienovel.com/api/rank/category/list",
 		directoryInterval: fanqieDirectoryMinInterval,
 	}
+	site.injectCookieString(cfg.Cookie)
+	return site
 }
 
 func (s *FanqieNovelSite) Key() string         { return "fanqienovel" }
 func (s *FanqieNovelSite) DisplayName() string { return "FanqieNovel" }
 func (s *FanqieNovelSite) Capabilities() Capabilities {
-	return Capabilities{Download: true, Search: true, Login: false}
+	return Capabilities{Download: true, Search: true, Login: s != nil && strings.TrimSpace(s.cfg.Cookie) != ""}
+}
+
+func (s *FanqieNovelSite) injectCookieString(raw string) {
+	if s == nil || s.client == nil {
+		return
+	}
+	raw = strings.TrimSpace(raw)
+	if len(raw) >= len("Cookie:") && strings.EqualFold(raw[:len("Cookie:")], "Cookie:") {
+		raw = strings.TrimSpace(raw[len("Cookie:"):])
+	}
+	if raw == "" {
+		return
+	}
+	if s.client.Jar == nil {
+		jar, _ := cookiejar.New(nil)
+		s.client.Jar = jar
+	}
+	base, err := url.Parse("https://fanqienovel.com/")
+	if err != nil {
+		return
+	}
+	cookies := make([]*http.Cookie, 0)
+	for _, part := range strings.Split(raw, ";") {
+		parts := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		cookies = append(cookies, &http.Cookie{
+			Name:   strings.TrimSpace(parts[0]),
+			Value:  strings.TrimSpace(parts[1]),
+			Path:   "/",
+			Domain: ".fanqienovel.com",
+		})
+	}
+	if len(cookies) > 0 {
+		s.client.Jar.SetCookies(base, cookies)
+	}
 }
 
 func (s *FanqieNovelSite) ResolveURL(rawURL string) (*ResolvedURL, bool) {
@@ -532,27 +571,37 @@ func writeAtomicSiteCache(path string, body []byte) error {
 }
 
 func (s *FanqieNovelSite) FetchChapter(ctx context.Context, bookID string, chapter model.Chapter) (model.Chapter, error) {
-	_ = bookID
-	body, err := s.getJSON(ctx, fmt.Sprintf("%s?item_id=%s", fanqieChapterAPI, chapter.ID), "")
+	chapter.ID = strings.TrimSpace(chapter.ID)
+	if chapter.ID == "" {
+		return chapter, fmt.Errorf("fanqienovel chapter id is empty")
+	}
+	readerURL := fanqieReaderURL + url.PathEscape(chapter.ID)
+	referer := fmt.Sprintf("https://fanqienovel.com/page/%s", url.PathEscape(strings.TrimSpace(bookID)))
+	markup, err := s.getHTML(ctx, readerURL, referer)
 	if err != nil {
-		return chapter, err
+		return chapter, fmt.Errorf("load fanqienovel chapter from official reader: %w", err)
 	}
-	var payload struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Data    struct {
-			Content string `json:"content"`
-		} `json:"data"`
+	state, err := extractFanqieInitialState(markup)
+	if err != nil {
+		return chapter, fmt.Errorf("parse fanqienovel official reader: %w", err)
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return chapter, err
+	reader := mapValue(state, "reader")
+	chapterData := mapValue(reader, "chapterData")
+	if chapterData == nil {
+		chapterData = mapValue(state, "chapterData")
 	}
-	if payload.Code != 200 {
-		return chapter, fmt.Errorf("fanqienovel chapter api: %s", payload.Message)
+	if chapterData == nil {
+		return chapter, fmt.Errorf("fanqienovel official reader chapter data not found")
 	}
-	rawContent := payload.Data.Content
+	if fanqieChapterIsLocked(chapterData) {
+		return chapter, fmt.Errorf("番茄章节已锁定或需要付费，当前账号无权下载；请配置有权访问该书的 fanqienovel Cookie")
+	}
+	if actualBookID := stringValue(chapterData["bookId"]); actualBookID != "" && strings.TrimSpace(bookID) != "" && actualBookID != strings.TrimSpace(bookID) {
+		return chapter, fmt.Errorf("fanqienovel chapter book mismatch: expected %s, got %s", bookID, actualBookID)
+	}
+	rawContent := stringValue(chapterData["content"])
 	if strings.TrimSpace(rawContent) == "" {
-		return chapter, fmt.Errorf("fanqienovel chapter content not found")
+		return chapter, fmt.Errorf("番茄官方阅读页未返回正文；如章节需要登录或购买，请配置有权访问该书的 Cookie")
 	}
 	doc, err := parseHTML(rawContent)
 	if err != nil {
@@ -560,8 +609,8 @@ func (s *FanqieNovelSite) FetchChapter(ctx context.Context, bookID string, chapt
 	}
 	paragraphs := make([]string, 0)
 	for _, p := range findAll(doc, func(n *html.Node) bool { return n.Type == html.ElementNode && n.Data == "p" }) {
-		text := cleanText(nodeText(p))
-		text = fanqieStripVoiceMarkers(text)
+		text := fanqieStripVoiceMarkers(cleanText(nodeText(p)))
+		text = applySubstMap(text, fanqieMap)
 		if text != "" {
 			paragraphs = append(paragraphs, text)
 		}
@@ -569,7 +618,11 @@ func (s *FanqieNovelSite) FetchChapter(ctx context.Context, bookID string, chapt
 	if len(paragraphs) == 0 {
 		return chapter, fmt.Errorf("fanqienovel parsed paragraph content is empty")
 	}
+	if strings.TrimSpace(chapter.Title) == "" {
+		chapter.Title = applySubstMap(fanqieStripVoiceMarkers(stringValue(chapterData["title"])), fanqieMap)
+	}
 	chapter.Content = strings.Join(paragraphs, "\n")
+	chapter.URL = readerURL
 	chapter.Downloaded = true
 	return chapter, nil
 }
@@ -582,28 +635,53 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 	if limit <= 0 {
 		limit = 10
 	}
-
-	// The official web search endpoint is protected by a slide captcha that
-	// cannot be solved server-side. This mirrors the public helper service used
-	// by the reference fanqienovel-downloader project. The helper treats its own
-	// result as a fixed-size page, so walk the offsets until we either satisfy
-	// the requested limit or the helper reports there are no more books.
 	results := make([]model.SearchResult, 0, limit)
 	seen := make(map[string]bool)
-	const helperPageSize = 10
-	const maxPages = 12
-	for page := 1; page <= maxPages && len(results) < limit; page++ {
-		if ctx.Err() != nil {
-			break
+	const pageSize = 10
+	maxPages := (limit + pageSize - 1) / pageSize
+	if maxPages > 10 {
+		maxPages = 10
+	}
+	searchURL := strings.TrimSpace(s.searchURL)
+	if searchURL == "" {
+		searchURL = fanqieSearchAPI
+	}
+	referer := "https://fanqienovel.com/search/" + url.PathEscape(keyword)
+	for pageIndex := 0; pageIndex < maxPages && len(results) < limit; pageIndex++ {
+		parsedEndpoint, err := url.Parse(searchURL)
+		if err != nil {
+			return nil, err
 		}
-		offset := (page - 1) * helperPageSize
-		endpoint := s.searchURL + "?key=" + url.QueryEscape(keyword) + "&offset=" + strconv.Itoa(offset)
-		body, err := s.getJSON(ctx, endpoint, "")
+		query := parsedEndpoint.Query()
+		query.Set("query_word", keyword)
+		query.Set("page_count", strconv.Itoa(pageSize))
+		query.Set("page_index", strconv.Itoa(pageIndex))
+		query.Set("query_type", "0")
+		query.Set("filter", "127,127,127,127")
+		parsedEndpoint.RawQuery = query.Encode()
+
+		body, responseHeaders, err := s.getJSONResponse(ctx, parsedEndpoint.String(), referer, map[string]string{
+			"Sec-Fetch-Site": "same-origin",
+			"Sec-Fetch-Mode": "cors",
+			"Sec-Fetch-Dest": "empty",
+		})
 		if err != nil {
 			if len(results) > 0 {
 				break
 			}
 			return nil, err
+		}
+		if strings.TrimSpace(string(body)) == "" {
+			if responseHeaders.Get("bdturing-verify") != "" || responseHeaders.Get("x-vc-bdturing-parameters") != "" {
+				if len(results) > 0 {
+					break
+				}
+				return nil, fmt.Errorf("番茄官方搜索触发安全验证，请先在 fanqienovel.com 完成验证，并在 fanqienovel 渠道配置有效 Cookie 后重试")
+			}
+			if len(results) > 0 {
+				break
+			}
+			return nil, fmt.Errorf("番茄官方搜索返回空响应，请稍后重试；如持续出现，请配置有效的 fanqienovel Cookie")
 		}
 		var payload map[string]any
 		if err := json.Unmarshal(body, &payload); err != nil {
@@ -612,11 +690,19 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 			}
 			return nil, err
 		}
-		if int64Value(payload["code"]) != 200 {
+		code := int64Value(payload["code"])
+		if code == -5 {
+			return results, nil
+		}
+		if code != 0 {
 			if len(results) > 0 {
 				break
 			}
-			return nil, fmt.Errorf("fanqienovel search api: %s", stringValue(payload["message"]))
+			message := firstNonEmptyString(stringValue(payload["message"]), stringValue(payload["msg"]))
+			if message == "" {
+				message = "unknown error"
+			}
+			return nil, fmt.Errorf("fanqienovel official search api: %s", message)
 		}
 		data := mapValue(payload, "data")
 		if data == nil {
@@ -624,64 +710,123 @@ func (s *FanqieNovelSite) Search(ctx context.Context, keyword string, limit int)
 		}
 
 		before := len(results)
-		hasMore := false
-		for _, tabRaw := range sliceValue(data["search_tabs"]) {
-			tab := mapValue(tabRaw)
-			tabData := sliceValue(tab["data"])
-			if len(tabData) == 0 {
+		books := fanqieSearchBookList(data)
+		for _, itemRaw := range books {
+			result, ok := fanqieSearchResult(itemRaw)
+			if !ok || seen[result.BookID] {
 				continue
 			}
-			if more, ok := tab["has_more"].(bool); ok {
-				hasMore = more
+			seen[result.BookID] = true
+			results = append(results, result)
+			if len(results) >= limit {
+				return results, nil
 			}
-			for _, itemRaw := range tabData {
-				item := mapValue(itemRaw)
-				books := sliceValue(item["book_data"])
-				if len(books) == 0 {
-					continue
-				}
-				book := mapValue(books[0])
-				bookID := stringValue(book["book_id"])
-				title := stringValue(book["book_name"])
-				if title == "" {
-					title = stringValue(book["raw_book_name"])
-				}
-				if bookID == "" || title == "" || seen[bookID] {
-					continue
-				}
-				seen[bookID] = true
-				author := stringValue(book["author"])
-				description := stringValue(book["abstract"])
-				if description == "" {
-					description = stringValue(book["book_abstract_v2"])
-				}
-				cover := stringValue(book["thumb_url"])
-				if cover == "" {
-					cover = stringValue(book["horiz_thumb_url"])
-				}
-				results = append(results, model.SearchResult{
-					Site:          s.Key(),
-					BookID:        bookID,
-					Title:         applySubstMap(title, fanqieMap),
-					Author:        applySubstMap(author, fanqieMap),
-					Description:   applySubstMap(description, fanqieMap),
-					URL:           fmt.Sprintf("https://fanqienovel.com/page/%s", bookID),
-					LatestChapter: applySubstMap(stringValue(book["last_chapter_title"]), fanqieMap),
-					CoverURL:      cover,
-				})
-				if len(results) >= limit {
-					return results, nil
-				}
-			}
-			// The first tab that carries results is the primary book list; the
-			// remaining tabs are media/community views without novels.
-			break
 		}
-		if len(results) == before || !hasMore {
+		total := int64Value(data["total_count"])
+		if len(results) == before || len(books) < pageSize || (total > 0 && int64((pageIndex+1)*pageSize) >= total) {
 			break
 		}
 	}
 	return results, nil
+}
+
+func fanqieSearchBookList(data map[string]any) []any {
+	for _, key := range []string{
+		"search_book_data_list", "searchBookList", "book_data_list", "bookDataList",
+		"book_list", "bookList", "books", "list",
+	} {
+		if books := sliceValue(data[key]); len(books) > 0 {
+			return books
+		}
+	}
+	return nil
+}
+
+func fanqieSearchResult(value any) (model.SearchResult, bool) {
+	book := mapValue(value)
+	if book == nil {
+		return model.SearchResult{}, false
+	}
+	if nested := mapValue(book["book_data"]); nested != nil {
+		book = nested
+	} else if nested := sliceValue(book["book_data"]); len(nested) > 0 {
+		if wrapped := mapValue(nested[0]); wrapped != nil {
+			book = wrapped
+		}
+	}
+	bookID := firstNonEmptyString(
+		stringValue(book["book_id"]),
+		stringValue(book["bookId"]),
+		stringValue(book["book_id_str"]),
+		stringValue(book["id"]),
+	)
+	title := firstNonEmptyString(
+		stringValue(book["book_name"]),
+		stringValue(book["bookName"]),
+		stringValue(book["raw_book_name"]),
+		stringValue(book["title"]),
+		stringValue(book["name"]),
+	)
+	if bookID == "" || title == "" {
+		return model.SearchResult{}, false
+	}
+	author := firstNonEmptyString(
+		fanqieAuthorName(book["author"]),
+		stringValue(book["author_name"]),
+		stringValue(book["authorName"]),
+	)
+	description := firstNonEmptyString(
+		stringValue(book["book_abstract"]),
+		stringValue(book["bookAbstract"]),
+		stringValue(book["abstract"]),
+		stringValue(book["book_abstract_v2"]),
+		stringValue(book["description"]),
+	)
+	latestChapter := firstNonEmptyString(
+		stringValue(book["last_chapter_title"]),
+		stringValue(book["lastChapterTitle"]),
+	)
+	return model.SearchResult{
+		Site:          "fanqienovel",
+		BookID:        bookID,
+		Title:         applySubstMap(title, fanqieMap),
+		Author:        applySubstMap(author, fanqieMap),
+		Description:   applySubstMap(description, fanqieMap),
+		URL:           fmt.Sprintf("https://fanqienovel.com/page/%s", bookID),
+		LatestChapter: applySubstMap(latestChapter, fanqieMap),
+		CoverURL:      fanqiePageCover(book),
+	}, true
+}
+
+func fanqieChapterIsLocked(chapterData map[string]any) bool {
+	for _, key := range []string{"isChapterLock", "is_chapter_lock"} {
+		if raw, ok := chapterData[key]; ok && fanqieValueIsTruthy(raw) {
+			return true
+		}
+	}
+	if raw, ok := chapterData["needPay"]; ok && fanqieValueIsTruthy(raw) {
+		return true
+	}
+	if raw, ok := chapterData["need_pay"]; ok && fanqieValueIsTruthy(raw) {
+		return true
+	}
+	return false
+}
+
+func fanqieValueIsTruthy(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes":
+			return true
+		default:
+			return false
+		}
+	default:
+		return int64Value(value) != 0
+	}
 }
 
 func (s *FanqieNovelSite) parseDirectory(body []byte) ([]model.Chapter, error) {
@@ -849,12 +994,17 @@ func fanqieChapterNumber(raw string) int {
 }
 
 func (s *FanqieNovelSite) getJSON(ctx context.Context, rawURL, referer string) ([]byte, error) {
+	body, _, err := s.getJSONResponse(ctx, rawURL, referer, nil)
+	return body, err
+}
+
+func (s *FanqieNovelSite) getJSONResponse(ctx context.Context, rawURL, referer string, extraHeaders map[string]string) ([]byte, http.Header, error) {
 	var lastErr error
 	backoff := 400 * time.Millisecond
 	for attempt := 0; attempt < 4; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		req.Header.Set("User-Agent", defaultBrowserUserAgent)
 		req.Header.Set("Accept", "application/json, text/plain, */*")
@@ -862,22 +1012,26 @@ func (s *FanqieNovelSite) getJSON(ctx context.Context, rawURL, referer string) (
 		if referer != "" {
 			req.Header.Set("Referer", referer)
 		}
+		for key, value := range extraHeaders {
+			req.Header.Set(key, value)
+		}
 		resp, err := s.client.Do(req)
 		if err != nil {
 			lastErr = err
 			if err := sleepContext(ctx, backoff); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			backoff *= 2
 			continue
 		}
 		status := resp.StatusCode
+		responseHeaders := resp.Header.Clone()
 		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = readErr
 			if err := sleepContext(ctx, backoff); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			backoff *= 2
 			continue
@@ -888,7 +1042,7 @@ func (s *FanqieNovelSite) getJSON(ctx context.Context, rawURL, referer string) (
 			}
 			lastErr = fmt.Errorf("http %d for %s", status, rawURL)
 			if err := sleepContext(ctx, backoff); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			backoff *= 2
 			continue
@@ -896,17 +1050,17 @@ func (s *FanqieNovelSite) getJSON(ctx context.Context, rawURL, referer string) (
 		if status == http.StatusTooManyRequests || status == http.StatusRequestTimeout || status >= 500 {
 			lastErr = fmt.Errorf("http %d for %s", status, rawURL)
 			if err := sleepContext(ctx, backoff); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			backoff *= 2
 			continue
 		}
 		if status < 200 || status >= 300 {
-			return nil, fmt.Errorf("http %d for %s", status, rawURL)
+			return nil, responseHeaders, fmt.Errorf("http %d for %s", status, rawURL)
 		}
-		return body, nil
+		return body, responseHeaders, nil
 	}
-	return nil, lastErr
+	return nil, nil, lastErr
 }
 
 func (s *FanqieNovelSite) getHTML(ctx context.Context, rawURL, referer string) (string, error) {

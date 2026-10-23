@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,6 +376,9 @@ func TestFanqieDiscoveryRoutesRankingsAndDecodesBooks(t *testing.T) {
 }
 
 func rewriteFanqieTestURLs(serverURL string, base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
 	return roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		clone := req.Clone(req.Context())
 		clone.URL.Scheme = "http"
@@ -402,23 +406,28 @@ func TestFanqieChapterNumber(t *testing.T) {
 }
 
 func TestFanqieSearchParsesResults(t *testing.T) {
-	var gotKey, gotOffset, gotAccept string
+	var gotQuery, gotPageCount, gotPageIndex, gotQueryType, gotFilter string
+	var gotAccept, gotReferer, gotFetchSite string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotKey = r.URL.Query().Get("key")
-		gotOffset = r.URL.Query().Get("offset")
+		if r.URL.Path != "/api/author/search/search_book/v1" {
+			t.Errorf("unexpected search path: %s", r.URL.Path)
+		}
+		gotQuery = r.URL.Query().Get("query_word")
+		gotPageCount = r.URL.Query().Get("page_count")
+		gotPageIndex = r.URL.Query().Get("page_index")
+		gotQueryType = r.URL.Query().Get("query_type")
+		gotFilter = r.URL.Query().Get("filter")
 		gotAccept = r.Header.Get("Accept")
+		gotReferer = r.Header.Get("Referer")
+		gotFetchSite = r.Header.Get("Sec-Fetch-Site")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{
-			"code": 200,
+			"code": 0,
 			"data": {
-				"search_tabs": [
-					{
-						"title": "综合",
-						"data": [
-							{"book_data":[{"book_id":"123","book_name":"Test Book","author":"Auth","abstract":"Desc","thumb_url":"http://img"}]},
-							{"book_data":[{"book_id":"456","book_name":"Second","author":"B","abstract":"","raw_book_name":"Second","horiz_thumb_url":"http://img2"}]}
-						]
-					}
+				"total_count": 2,
+				"search_book_data_list": [
+					{"book_id":"123","book_name":"Test Book","author":"Auth","book_abstract":"Desc","thumb_url":"http://img","last_chapter_title":"Latest"},
+					{"bookId":"456","bookName":"Second","author_name":"B","bookAbstract":"Second desc","thumb_uri":"covers/second.jpg","lastChapterTitle":"Second latest"}
 				]
 			}
 		}`)
@@ -428,20 +437,20 @@ func TestFanqieSearchParsesResults(t *testing.T) {
 	site := &FanqieNovelSite{
 		cfg:       config.DefaultConfig().ResolveSiteConfig("fanqienovel"),
 		client:    server.Client(),
-		searchURL: server.URL,
+		searchURL: server.URL + "/api/author/search/search_book/v1",
 	}
 	results, err := site.Search(context.Background(), "hello", 5)
 	if err != nil {
 		t.Fatalf("Search returned error: %v", err)
 	}
-	if gotKey != "hello" {
-		t.Fatalf("unexpected key query: %q", gotKey)
+	if gotQuery != "hello" {
+		t.Fatalf("unexpected query_word: %q", gotQuery)
 	}
-	if gotOffset != "0" {
-		t.Fatalf("unexpected offset: %q", gotOffset)
+	if gotPageCount != "10" || gotPageIndex != "0" || gotQueryType != "0" || gotFilter != "127,127,127,127" {
+		t.Fatalf("unexpected official search params: count=%q index=%q type=%q filter=%q", gotPageCount, gotPageIndex, gotQueryType, gotFilter)
 	}
-	if gotAccept == "" {
-		t.Fatalf("Accept header not set")
+	if gotAccept == "" || gotReferer != "https://fanqienovel.com/search/hello" || gotFetchSite != "same-origin" {
+		t.Fatalf("unexpected official search headers: accept=%q referer=%q fetch-site=%q", gotAccept, gotReferer, gotFetchSite)
 	}
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
@@ -452,8 +461,11 @@ func TestFanqieSearchParsesResults(t *testing.T) {
 	if results[0].URL != "https://fanqienovel.com/page/123" {
 		t.Fatalf("unexpected URL: %q", results[0].URL)
 	}
-	if results[1].CoverURL != "http://img2" {
-		t.Fatalf("unexpected fallback cover: %q", results[1].CoverURL)
+	if results[0].LatestChapter != "Latest" {
+		t.Fatalf("unexpected latest chapter: %q", results[0].LatestChapter)
+	}
+	if results[1].CoverURL != "https://p3-reading-sign.fqnovelpic.com/covers/second.jpg" {
+		t.Fatalf("unexpected cover: %q", results[1].CoverURL)
 	}
 }
 
@@ -461,16 +473,13 @@ func TestFanqieSearchHonorsLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{
-			"code": 200,
+			"code": 0,
 			"data": {
-				"search_tabs": [
-					{
-						"data": [
-							{"book_data":[{"book_id":"1","book_name":"A"}]},
-							{"book_data":[{"book_id":"2","book_name":"B"}]},
-							{"book_data":[{"book_id":"3","book_name":"C"}]}
-						]
-					}
+				"total_count": 3,
+				"search_book_data_list": [
+					{"book_id":"1","book_name":"A"},
+					{"book_id":"2","book_name":"B"},
+					{"book_id":"3","book_name":"C"}
 				]
 			}
 		}`)
@@ -484,5 +493,177 @@ func TestFanqieSearchHonorsLimit(t *testing.T) {
 	}
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestFanqieSearchReportsOfficialVerificationWithoutLeakingCookie(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("bdturing-verify", `{"type":"verify","subtype":"slide"}`)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := config.DefaultConfig().ResolveSiteConfig("fanqienovel")
+	cfg.Cookie = "sessionid=top-secret-cookie"
+	site := &FanqieNovelSite{
+		cfg:       cfg,
+		client:    server.Client(),
+		html:      NewHTMLSite(server.Client()),
+		searchURL: server.URL,
+	}
+	_, err := site.Search(context.Background(), "hello", 5)
+	if err == nil {
+		t.Fatal("expected verification error")
+	}
+	if !strings.Contains(err.Error(), "安全验证") || !strings.Contains(err.Error(), "Cookie") {
+		t.Fatalf("error should explain verification and Cookie configuration: %v", err)
+	}
+	if strings.Contains(err.Error(), "top-secret-cookie") {
+		t.Fatalf("error leaked configured Cookie: %v", err)
+	}
+}
+
+func TestFanqieFetchChapterUsesOfficialReaderState(t *testing.T) {
+	var gotReferer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/reader/123" {
+			http.NotFound(w, r)
+			return
+		}
+		gotReferer = r.Header.Get("Referer")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<html><body><script>
+			window.__INITIAL_STATE__={"reader":{"chapterData":{
+				"bookId":"book-1",
+				"title":"Official Chapter",
+				"isChapterLock":false,
+				"needPay":0,
+				"content":"\u003Cp\u003EHello\u003C\u002Fp\u003E\u003Cp\u003EWorld\u003C\u002Fp\u003E"
+			}}};
+		</script></body></html>`)
+	}))
+	defer server.Close()
+
+	client := server.Client()
+	client.Transport = rewriteFanqieTestURLs(server.URL, client.Transport)
+	site := &FanqieNovelSite{client: client, html: NewHTMLSite(client)}
+	chapter, err := site.FetchChapter(context.Background(), "book-1", model.Chapter{ID: "123"})
+	if err != nil {
+		t.Fatalf("FetchChapter: %v", err)
+	}
+	if chapter.Content != "Hello\nWorld" {
+		t.Fatalf("unexpected content: %q", chapter.Content)
+	}
+	if chapter.Title != "Official Chapter" {
+		t.Fatalf("unexpected title: %q", chapter.Title)
+	}
+	if gotReferer != "https://fanqienovel.com/page/book-1" {
+		t.Fatalf("unexpected reader referer: %q", gotReferer)
+	}
+	if !chapter.Downloaded || chapter.URL != "https://fanqienovel.com/reader/123" {
+		t.Fatalf("unexpected downloaded chapter: %+v", chapter)
+	}
+}
+
+func TestFanqieFetchChapterRejectsLockedContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<html><body><script>
+			window.__INITIAL_STATE__={"reader":{"chapterData":{
+				"bookId":"book-1",
+				"isChapterLock":true,
+				"needPay":1,
+				"content":"\u003Cp\u003EPreview only\u003C\u002Fp\u003E"
+			}}};
+		</script></body></html>`)
+	}))
+	defer server.Close()
+
+	client := server.Client()
+	client.Transport = rewriteFanqieTestURLs(server.URL, client.Transport)
+	site := &FanqieNovelSite{client: client, html: NewHTMLSite(client)}
+	chapter, err := site.FetchChapter(context.Background(), "book-1", model.Chapter{ID: "456"})
+	if err == nil {
+		t.Fatal("expected locked chapter error")
+	}
+	if chapter.Content != "" || chapter.Downloaded {
+		t.Fatalf("locked chapter must not be treated as downloaded: %+v", chapter)
+	}
+	if !strings.Contains(err.Error(), "已锁定") || !strings.Contains(err.Error(), "Cookie") {
+		t.Fatalf("unexpected locked chapter error: %v", err)
+	}
+}
+
+func TestFanqieDownloadUsesOfficialPlanAndReader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/page/1001":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(w, `<html><body><script>
+				window.__INITIAL_STATE__={"page":{"bookName":"Official Download","authorName":"Author","abstract":"Description"}};
+			</script></body></html>`)
+		case "/api/reader/directory/detail":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"code":0,"data":{"chapterList":[
+				{"itemId":"2","title":"Second","realChapterOrder":"2"},
+				{"itemId":"1","title":"First","realChapterOrder":"1"}
+			]}}`)
+		case "/reader/1", "/reader/2":
+			itemID := strings.TrimPrefix(r.URL.Path, "/reader/")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprintf(w, `<html><body><script>
+				window.__INITIAL_STATE__={"reader":{"chapterData":{
+					"bookId":"1001","isChapterLock":false,"needPay":0,
+					"content":"\u003Cp\u003EContent %s\u003C\u002Fp\u003E"
+				}}};
+			</script></body></html>`, itemID)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.General.CacheDir = t.TempDir()
+	site := NewFanqieNovelSite(cfg.ResolveSiteConfig("fanqienovel"))
+	site.client.Transport = rewriteFanqieTestURLs(server.URL, site.client.Transport)
+	site.html = NewHTMLSite(site.client)
+	site.directoryInterval = time.Nanosecond
+
+	book, err := site.Download(context.Background(), model.BookRef{BookID: "1001"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if book.Title != "Official Download" || len(book.Chapters) != 2 {
+		t.Fatalf("unexpected book: %+v", book)
+	}
+	if book.Chapters[0].Content != "Content 1" || book.Chapters[1].Content != "Content 2" {
+		t.Fatalf("unexpected downloaded content: %+v", book.Chapters)
+	}
+	for _, chapter := range book.Chapters {
+		if !chapter.Downloaded || !strings.HasPrefix(chapter.URL, "https://fanqienovel.com/reader/") {
+			t.Fatalf("chapter was not loaded from the official reader: %+v", chapter)
+		}
+	}
+}
+
+func TestFanqieCookieIsScopedToOfficialDomain(t *testing.T) {
+	cfg := config.DefaultConfig().ResolveSiteConfig("fanqienovel")
+	cfg.Cookie = "Cookie: sessionid=abc; ttwid=def"
+	site := NewFanqieNovelSite(cfg)
+
+	official, err := url.Parse("https://fanqienovel.com/reader/123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := url.Parse("https://example.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cookies := site.client.Jar.Cookies(official); len(cookies) != 2 {
+		t.Fatalf("expected two official-domain cookies, got %v", cookies)
+	}
+	if cookies := site.client.Jar.Cookies(other); len(cookies) != 0 {
+		t.Fatalf("Cookie leaked outside fanqienovel.com: %v", cookies)
 	}
 }
