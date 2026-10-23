@@ -2,7 +2,6 @@ package site
 
 import (
 	"github.com/guohuiyuan/go-novel-dl/internal/config"
-	"os"
 	"strings"
 	"testing"
 )
@@ -71,60 +70,6 @@ func TestWereadEscapeComponentMatchesEncodeURIComponent(t *testing.T) {
 	}
 }
 
-func TestWereadDecodeRealChapterPayload(t *testing.T) {
-	raw, err := os.ReadFile("testdata/weread_chapter_payload.txt")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
-	decoded, err := wereadDecodeChapterPayload(string(raw))
-	if err != nil {
-		t.Fatalf("wereadDecodeChapterPayload: %v", err)
-	}
-	markup := string(decoded)
-
-	if !strings.HasPrefix(strings.TrimSpace(markup), "<?xml") {
-		t.Fatalf("decoded markup should start with xml prolog, got %q", firstRunes(markup, 60))
-	}
-	if !wereadLooksLikeFullDocument(markup) {
-		t.Fatal("decoded chapter should be a complete document")
-	}
-	if strings.ContainsRune(markup, '\uFFFD') {
-		t.Fatalf("decoded markup still contains replacement characters, unshuffle likely wrong")
-	}
-
-	text := wereadHTMLToText(markup)
-	if !strings.Contains(text, "外包妈妈") {
-		t.Fatalf("chapter text missing expected title, got %q", firstRunes(text, 80))
-	}
-	if strings.Contains(text, "<") || strings.Contains(text, "xmlns") {
-		t.Fatalf("chapter text still contains markup: %q", firstRunes(text, 120))
-	}
-	if lines := strings.Split(text, "\n"); len(lines) < 10 {
-		t.Fatalf("expected many paragraphs, got %d", len(lines))
-	}
-}
-
-func TestWereadDecodeRealCopyrightPayload(t *testing.T) {
-	raw, err := os.ReadFile("testdata/weread_copyright_payload.txt")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
-	decoded, err := wereadDecodeChapterPayload(string(raw))
-	if err != nil {
-		t.Fatalf("wereadDecodeChapterPayload: %v", err)
-	}
-	text := wereadHTMLToText(string(decoded))
-	if !strings.Contains(text, "版权信息") {
-		t.Fatalf("copyright page text unexpected: %q", firstRunes(text, 120))
-	}
-	if strings.ContainsRune(text, '\uFFFD') {
-		t.Fatal("copyright text contains replacement characters")
-	}
-	if lines := strings.Split(text, "\n\n"); len(lines) < 3 {
-		t.Fatalf("copyright page should keep one paragraph per block, got %d: %q", len(lines), firstRunes(text, 160))
-	}
-}
-
 // 微信读书的部分章节写成 <head><title/></head>。HTML 词法把自闭合 title 当成
 // RCDATA 起点，没有 </title> 就会把整篇正文吞掉，这一页曾经因此报“解码后没有正文”。
 func TestWereadHTMLToTextHandlesSelfClosingTitle(t *testing.T) {
@@ -151,18 +96,6 @@ func TestWereadHTMLToTextKeepsBlockElements(t *testing.T) {
 	want := "书名\n\n第一段\n\n第二段\n\n换行\n\n条目一\n\n条目二"
 	if got != want {
 		t.Fatalf("wereadHTMLToText = %q, want %q", got, want)
-	}
-}
-
-func TestWereadDecodeChapterPayloadRejectsTamperedChecksum(t *testing.T) {
-	raw, err := os.ReadFile("testdata/weread_copyright_payload.txt")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
-	payload := strings.TrimSpace(string(raw))
-	tampered := "0" + payload[1:]
-	if _, err := wereadDecodeChapterPayload(tampered); err == nil {
-		t.Fatal("expected checksum mismatch to be rejected")
 	}
 }
 

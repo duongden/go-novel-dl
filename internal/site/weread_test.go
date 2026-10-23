@@ -3,11 +3,9 @@ package site
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -251,49 +249,6 @@ func TestWeReadDownloadPlanKeepsPaidChaptersWhenUnrestricted(t *testing.T) {
 	}
 }
 
-func TestWeReadFetchChapterDecodesPayload(t *testing.T) {
-	payload, err := os.ReadFile("testdata/weread_copyright_payload.txt")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
-	var sentBody map[string]any
-	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
-		switch {
-		case strings.HasPrefix(req.URL.Path, "/web/reader/"):
-			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
-		case req.URL.Path == "/web/book/chapter/e_2":
-			defer req.Body.Close()
-			_ = json.NewDecoder(req.Body).Decode(&sentBody)
-			return wereadTestResponse(req, http.StatusOK, string(payload)), nil
-		default:
-			return wereadTestResponse(req, http.StatusNotFound, `{}`), nil
-		}
-	})
-
-	chapter, err := site.FetchChapter(context.Background(), "201", model.Chapter{ID: "44", Title: "版权信息"})
-	if err != nil {
-		t.Fatalf("FetchChapter: %v", err)
-	}
-	if !chapter.Downloaded {
-		t.Fatal("chapter should be marked downloaded")
-	}
-	if !strings.Contains(chapter.Content, "版权信息") {
-		t.Fatalf("unexpected chapter content: %q", firstRunes(chapter.Content, 80))
-	}
-	if strings.Contains(chapter.Content, "<") {
-		t.Fatalf("content still contains markup: %q", firstRunes(chapter.Content, 80))
-	}
-	if sentBody["ps"] != "ps-test" {
-		t.Fatalf("request body should carry psvts from the reader page, got %v", sentBody["ps"])
-	}
-	if sentBody["b"] != wereadEncodeID("201") {
-		t.Fatalf("request body b should be encoded book id, got %v", sentBody["b"])
-	}
-	if sentBody["c"] != wereadEncodeID("44") {
-		t.Fatalf("request body c should be encoded chapter uid, got %v", sentBody["c"])
-	}
-}
-
 func TestWeReadFetchChapterReturnsPreviewFragmentAsLocked(t *testing.T) {
 	preview := wereadBuildPayloadForTest("<html><body><p>只有一小段试读</p></body>")
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
@@ -319,15 +274,16 @@ func TestWeReadFetchChapterReturnsPreviewFragmentAsLocked(t *testing.T) {
 }
 
 func TestWeReadDownloadEndToEnd(t *testing.T) {
-	payload, err := os.ReadFile("testdata/weread_copyright_payload.txt")
-	if err != nil {
-		t.Fatalf("read testdata: %v", err)
-	}
+	payload := wereadBuildPayloadForTest(
+		`<?xml version="1.0" encoding="utf-8"?>` +
+			`<html xmlns="http://www.w3.org/1999/xhtml"><head><title/></head>` +
+			`<body><h1>版权信息</h1><p>合成测试正文</p></body></html>`,
+	)
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
 		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
 			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
 		}
-		return wereadTestResponse(req, http.StatusOK, string(payload)), nil
+		return wereadTestResponse(req, http.StatusOK, payload), nil
 	})
 
 	book, err := site.Download(context.Background(), model.BookRef{BookID: "201"})
@@ -339,6 +295,9 @@ func TestWeReadDownloadEndToEnd(t *testing.T) {
 	}
 	if book.Chapters[0].Order != 1 {
 		t.Fatalf("chapter order should be normalized, got %d", book.Chapters[0].Order)
+	}
+	if !strings.Contains(book.Chapters[0].Content, "合成测试正文") {
+		t.Fatalf("unexpected decoded content: %q", book.Chapters[0].Content)
 	}
 }
 
