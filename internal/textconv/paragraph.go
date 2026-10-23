@@ -26,24 +26,42 @@ const (
 
 // NormalizeParagraphs repairs chapter text that was split into fixed-width
 // display lines by source sites. Adjacent fragments are joined until the
-// previous line reaches a real paragraph boundary.
+// previous line reaches a real paragraph boundary. A blank line is treated as
+// an explicit paragraph break and is never joined across, so sources that
+// already emit structured paragraphs keep their boundaries.
 func NormalizeParagraphs(content string) string {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
 	content = strings.ReplaceAll(content, "\u00a0", " ")
-	lines := strings.Split(content, "\n")
-	normalized := make([]string, 0, len(lines))
-	for _, raw := range lines {
-		line := normalizeParagraphLine(raw)
-		if line != "" {
-			normalized = append(normalized, line)
-		}
+
+	paragraphs := make([]string, 0, 32)
+	block := make([]string, 0, 32)
+	flush := func() {
+		paragraphs = append(paragraphs, joinParagraphBlock(block)...)
+		block = block[:0]
 	}
-	wrapWidth := detectFixedWrapWidth(normalized)
+	for _, raw := range strings.Split(content, "\n") {
+		line := normalizeParagraphLine(raw)
+		if line == "" {
+			flush()
+			continue
+		}
+		block = append(block, line)
+	}
+	flush()
+	return strings.Join(paragraphs, "\n")
+}
+
+// joinParagraphBlock 复刻固定宽度折行的拼接规则，只在同一段落块内生效。
+func joinParagraphBlock(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	wrapWidth := detectFixedWrapWidth(lines)
 	paragraphs := make([]string, 0, len(lines))
 	lastFragment := ""
 
-	for _, line := range normalized {
+	for _, line := range lines {
 		if len(paragraphs) > 0 &&
 			!isStandaloneContentLine(lastFragment) &&
 			!isStandaloneContentLine(line) &&
@@ -55,7 +73,7 @@ func NormalizeParagraphs(content string) string {
 		paragraphs = append(paragraphs, line)
 		lastFragment = line
 	}
-	return strings.Join(paragraphs, "\n")
+	return paragraphs
 }
 
 func normalizeParagraphLine(line string) string {

@@ -2,9 +2,12 @@ package site
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -103,16 +106,19 @@ func TestWeReadDiscoveryListsAndRankingBooks(t *testing.T) {
 	}
 }
 
-func TestWeReadIsSearchOnly(t *testing.T) {
+func TestWeReadAdvertisesDownloadAndSearch(t *testing.T) {
 	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
 		return wereadTestResponse(req, http.StatusInternalServerError, `{}`), nil
 	})
-	if capabilities := site.Capabilities(); !capabilities.Search || capabilities.Download || capabilities.Login {
+	capabilities := site.Capabilities()
+	if !capabilities.Search || !capabilities.Download {
 		t.Fatalf("unexpected capabilities: %+v", capabilities)
 	}
-	if _, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "201"}); err == nil ||
-		!strings.Contains(err.Error(), "未启用下载") || !strings.Contains(err.Error(), "未配置 Cookie") {
-		t.Fatalf("expected an explicit download limitation, got %v", err)
+	if capabilities.Login {
+		t.Fatalf("login should stay off without a cookie: %+v", capabilities)
+	}
+	if _, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "201"}); err == nil {
+		t.Fatal("expected the plan to fail when the reader page is unavailable")
 	}
 }
 
@@ -160,12 +166,9 @@ func TestWeReadConfiguredCookieIsScopedAndKeptOutOfErrors(t *testing.T) {
 
 	_, err = site.FetchChapter(context.Background(), "book", model.Chapter{ID: "chapter"})
 	if err == nil {
-		t.Fatal("expected protected chapter download to remain disabled")
+		t.Fatal("expected an error for an unrecognizable chapter reference")
 	}
 	message := err.Error()
-	if !strings.Contains(message, "服务端签名保护") || !strings.Contains(message, "未启用下载") {
-		t.Fatalf("unexpected configured-cookie limitation: %v", err)
-	}
 	if strings.Contains(message, sessionCookie) || strings.Contains(message, readerCookie) {
 		t.Fatalf("download error leaked cookie data: %v", err)
 	}
@@ -188,4 +191,165 @@ func wereadTestResponse(req *http.Request, status int, body string) *http.Respon
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
 	}
+}
+
+func wereadReaderPageStub() string {
+	return `<html><body><script>window.__INITIAL_STATE__=` +
+		`{"reader":{"infoId":"rid-201","bookId":"201","psvts":"ps-test",` +
+		`"bookInfo":{"bookId":"201","title":"Book 201","author":"Author 201","intro":"Intro 201",` +
+		`"cover":"https://cdn.example/201.jpg","category":"精品小说"},` +
+		`"chapterInfos":[{"chapterUid":44,"chapterIdx":1,"title":"版权信息","price":0,"paid":0},` +
+		`{"chapterUid":45,"chapterIdx":2,"title":"付费章","price":2.5,"paid":1}]}};` +
+		`</script></body></html>`
+}
+
+func TestWeReadDownloadPlanSkipsPaidChapters(t *testing.T) {
+	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
+			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
+		}
+		return wereadTestResponse(req, http.StatusNotFound, `{}`), nil
+	})
+
+	book, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "201"})
+	if err != nil {
+		t.Fatalf("DownloadPlan: %v", err)
+	}
+	if book.Title != "Book 201" || book.Author != "Author 201" {
+		t.Fatalf("unexpected book metadata: %+v", book)
+	}
+	if len(book.Chapters) != 1 || book.Chapters[0].ID != "44" {
+		t.Fatalf("paid chapter should be skipped without login, got %+v", book.Chapters)
+	}
+	if !strings.HasPrefix(book.SourceURL, "https://weread.qq.com/web/reader/") {
+		t.Fatalf("unexpected source url: %q", book.SourceURL)
+	}
+}
+
+func TestWeReadDownloadPlanKeepsPaidChaptersWhenUnrestricted(t *testing.T) {
+	cfg := config.DefaultConfig()
+	siteCfg := cfg.ResolveSiteConfig("weread")
+	siteCfg.General.FetchInaccessible = true
+	site := NewWeReadSite(siteCfg)
+	site.client.Transport = wereadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
+	})
+
+	book, err := site.DownloadPlan(context.Background(), model.BookRef{BookID: "201"})
+	if err != nil {
+		t.Fatalf("DownloadPlan: %v", err)
+	}
+	if len(book.Chapters) != 2 {
+		t.Fatalf("fetch_inaccessible should keep paid chapters, got %d", len(book.Chapters))
+	}
+}
+
+func TestWeReadFetchChapterDecodesPayload(t *testing.T) {
+	payload, err := os.ReadFile("testdata/weread_copyright_payload.txt")
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	var sentBody map[string]any
+	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case strings.HasPrefix(req.URL.Path, "/web/reader/"):
+			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
+		case req.URL.Path == "/web/book/chapter/e_2":
+			defer req.Body.Close()
+			_ = json.NewDecoder(req.Body).Decode(&sentBody)
+			return wereadTestResponse(req, http.StatusOK, string(payload)), nil
+		default:
+			return wereadTestResponse(req, http.StatusNotFound, `{}`), nil
+		}
+	})
+
+	chapter, err := site.FetchChapter(context.Background(), "201", model.Chapter{ID: "44", Title: "版权信息"})
+	if err != nil {
+		t.Fatalf("FetchChapter: %v", err)
+	}
+	if !chapter.Downloaded {
+		t.Fatal("chapter should be marked downloaded")
+	}
+	if !strings.Contains(chapter.Content, "版权信息") {
+		t.Fatalf("unexpected chapter content: %q", firstRunes(chapter.Content, 80))
+	}
+	if strings.Contains(chapter.Content, "<") {
+		t.Fatalf("content still contains markup: %q", firstRunes(chapter.Content, 80))
+	}
+	if sentBody["ps"] != "ps-test" {
+		t.Fatalf("request body should carry psvts from the reader page, got %v", sentBody["ps"])
+	}
+	if sentBody["b"] != wereadEncodeID("201") {
+		t.Fatalf("request body b should be encoded book id, got %v", sentBody["b"])
+	}
+	if sentBody["c"] != wereadEncodeID("44") {
+		t.Fatalf("request body c should be encoded chapter uid, got %v", sentBody["c"])
+	}
+}
+
+func TestWeReadFetchChapterRejectsPreviewFragment(t *testing.T) {
+	preview := wereadBuildPayloadForTest("<html><body><p>只有一小段试读</p></body>")
+	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
+			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
+		}
+		return wereadTestResponse(req, http.StatusOK, preview), nil
+	})
+
+	_, err := site.FetchChapter(context.Background(), "201", model.Chapter{ID: "45", Title: "付费章"})
+	if err == nil || !strings.Contains(err.Error(), "试读") {
+		t.Fatalf("expected preview-fragment error, got %v", err)
+	}
+}
+
+func TestWeReadDownloadEndToEnd(t *testing.T) {
+	payload, err := os.ReadFile("testdata/weread_copyright_payload.txt")
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	site := newWeReadTestSite(t, func(req *http.Request) (*http.Response, error) {
+		if strings.HasPrefix(req.URL.Path, "/web/reader/") {
+			return wereadTestResponse(req, http.StatusOK, wereadReaderPageStub()), nil
+		}
+		return wereadTestResponse(req, http.StatusOK, string(payload)), nil
+	})
+
+	book, err := site.Download(context.Background(), model.BookRef{BookID: "201"})
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if len(book.Chapters) != 1 || !book.Chapters[0].Downloaded {
+		t.Fatalf("unexpected downloaded chapters: %+v", book.Chapters)
+	}
+	if book.Chapters[0].Order != 1 {
+		t.Fatalf("chapter order should be normalized, got %d", book.Chapters[0].Order)
+	}
+}
+
+// wereadBuildPayloadForTest 造一个服务端格式的响应：md5 头 + 标记位 + 置换后的 base64。
+func wereadBuildPayloadForTest(markup string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(markup))
+	shuffled := wereadShuffleForTest(encoded)
+	body := "P" + shuffled
+	return strings.ToUpper(wereadMD5Hex(body)) + body
+}
+
+// wereadShuffleForTest 是 wereadUnshuffle 的逆操作（成对交换按相反顺序执行）。
+func wereadShuffleForTest(payload string) string {
+	keys := wereadShuffleKeys(payload)
+	if len(keys) < 2 {
+		return payload
+	}
+	chars := []byte(payload)
+	for k := 1; k < len(keys); k += 2 {
+		for j := 0; j <= 1; j++ {
+			a := keys[k-1] + j
+			b := keys[k] + j
+			if a < 0 || b < 0 || a >= len(chars) || b >= len(chars) {
+				continue
+			}
+			chars[a], chars[b] = chars[b], chars[a]
+		}
+	}
+	return string(chars)
 }

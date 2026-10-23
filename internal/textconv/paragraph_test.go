@@ -69,6 +69,24 @@ func TestNormalizeParagraphsDoesNotJoinNormalSentenceLines(t *testing.T) {
 	}
 }
 
+// 空行是显式段落边界。来源已经按段落输出时，标题、署名这类不带句末标点的短行
+// 不能被折行修复逻辑粘进下一段。
+func TestNormalizeParagraphsKeepsBlankLineParagraphBreaks(t *testing.T) {
+	input := "版权信息\n\n书名：测试书名\n\n作者：测试作者"
+	want := "版权信息\n书名：测试书名\n作者：测试作者"
+	if got := NormalizeParagraphs(input); got != want {
+		t.Fatalf("NormalizeParagraphs() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeParagraphsStillJoinsInsideBlock(t *testing.T) {
+	input := "第一行没有标点\n第二行继续同一段。\n\n另一段从这里开始。"
+	want := "第一行没有标点第二行继续同一段。\n另一段从这里开始。"
+	if got := NormalizeParagraphs(input); got != want {
+		t.Fatalf("NormalizeParagraphs() = %q, want %q", got, want)
+	}
+}
+
 func TestDetectFixedWrapWidthRejectsVariedParagraphLines(t *testing.T) {
 	lines := []string{
 		"这是一段长度不同的普通正文内容。",

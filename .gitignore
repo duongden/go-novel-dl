@@ -11,3 +11,4 @@ tmp/
 cmd/novel-dl/*.syso
 *.log
 logo_256x256.png
+internal/site/testdata
